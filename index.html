@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Tree-based Text CRDT</title>
+    <script src="script.js">
+    </script>
+    <style>
+        .container {
+            padding: 1rem;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        input {
+            padding: 0.5rem;
+            border: 1px solid #ccc;
+            border-radius: 0.25rem;
+        }
+
+        button {
+            background: #3b82f6;
+            color: white;
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 0.25rem;
+            cursor: pointer;
+        }
+
+        .output {
+            border: 1px solid #ccc;
+            padding: 1rem;
+            border-radius: 0.25rem;
+            min-height: 3rem;
+            font-family: monospace;
+            white-space: pre;
+        }
+
+        textarea {
+            padding: 0.5rem;
+            border: 1px solid #ccc;
+            border-radius: 0.25rem;
+            min-height: 100px;
+            resize: vertical;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="input-group">
+            <textarea id="input1"></textarea>
+            <textarea id="input2"></textarea>
+            <button id="updateButton">Update</button>
+        </div>
+        <p>Tree 1</p>
+        <div id="tree1" class="output"></div>
+        <p>Tree 2</p>
+        <div id="tree2" class="output"></div>
+        <p>Last Edits 1</p>
+        <div id="last-edits-1" class="output"></div>
+        <p>Last Edits 2</p>
+        <div id="last-edits-2" class="output"></div>
+        <p>Text</p>
+        <div id="output-text" class="output"></div>
+    </div>
+</body>
+
+
+</html>

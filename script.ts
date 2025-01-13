@@ -78,6 +78,7 @@ window.onload = () => {
             return;
         }
 
+        state.next_local_id = edits.next_local_id;
         els.error.textContent = '';
         if (edits.edits.length === 0) {
             return;

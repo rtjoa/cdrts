@@ -2,7 +2,7 @@
 <html>
 
 <head>
-    <title>Tree-based Text CRDT</title>
+    <title>Tree-Based Text CRDT</title>
     <script src="script.js"></script>
     <style>
         :root {
@@ -163,17 +163,18 @@
         .description h2 {
             color: var(--primary-color);
             font-size: 1.5rem;
-            margin-bottom: 1rem;
+            margin: 2rem 0 1rem;
         }
 
         .description h3 {
             font-size: 1.25rem;
-            margin: 1.5rem 0 0.75rem;
+            margin: 2rem 0 1rem;
         }
 
         .description p {
             color: #4b5563;
             max-width: 65ch;
+            margin: 1rem 0;
         }
 
         .description ul {
@@ -257,6 +258,11 @@
             <h2>Instructions</h2>
             <p>This demo implements a tree-based CRDT for collaborative text editing. Each peer maintains their own copy
                 of the text and can make local edits that are eventually synchronized.</p>
+            <p>
+                Inspired by <a href="https://www.madebyevan.com/algos/crdt-tree-based-indexing/">Evan Wallace's
+                    tree-based
+                    CRDT</a>.</p>
+            </p>
 
             <h3>How to Edit</h3>
             <ul>
@@ -284,6 +290,7 @@
                 </div>
             </div>
 
+            <h2>Implementation</h2>
             <h3>Tree Representation</h3>
             <p>Node IDs are formatted as <code>peer_id/clock</code>. The clock is a <a
                     href="https://en.wikipedia.org/wiki/Lamport_timestamp">Lamport timestamp</a>.

@@ -82,17 +82,17 @@ const isNodeTombstone = (node_id: string, tree_by_id: Map<string, Tree>): boolea
 };
 
 const compare_ids = (id1: string, id2: string): number => {
-    // Sort by increasing peer id, then decreasing local id
+    // Sort by decreasing local id (lamport clock), then by increasing peer id
     let [peer_id1, local_id1] = id1.split('/');
     let [peer_id2, local_id2] = id2.split('/');
     let peer_id1_num = parseInt(peer_id1);
     let peer_id2_num = parseInt(peer_id2);
     let local_id1_num = parseInt(local_id1);
     let local_id2_num = parseInt(local_id2);
-    if (peer_id1_num !== peer_id2_num) {
-        return peer_id1_num - peer_id2_num;
+    if (local_id1_num !== local_id2_num) {
+        return local_id2_num - local_id1_num;
     }
-    return local_id2_num - local_id1_num;
+    return peer_id1_num - peer_id2_num;
 }
 
 const mergeEdits = (state: PeerState, edits: Edit[]): void => {
@@ -111,6 +111,8 @@ const mergeEdits = (state: PeerState, edits: Edit[]): void => {
                 children: [],
                 value: edit.value,
             });
+
+            state.next_local_id = Math.max(state.next_local_id, parseInt(edit.new_id.split('/')[1]) + 1);
         } else {
             const to_delete = state.tree_by_id.get(edit.index) as Tree;
             state.tree_by_id.set(edit.index, {
@@ -140,6 +142,7 @@ const combineTrees = (tree: Tree, existing: Tree): Tree => {
 
 const mergeTree = (state: PeerState, incoming_tree_by_id: Map<string, Tree>): void => {
     incoming_tree_by_id.forEach((tree, id) => {
+        state.next_local_id = Math.max(state.next_local_id, parseInt(id.split('/')[1]) + 1);
         if (!state.tree_by_id.has(id)) {
             state.tree_by_id.set(id, tree);
         } else {
@@ -306,7 +309,7 @@ class CRDTEditor {
         }
 
         const nodes = preorderTree(state.root_id, state.tree_by_id);
-        let non_tombstone_node_ids = [nodes[0]];
+        let non_tombstone_node_ids = [nodes[0]]; // stack to delete
         let text_i = 1;
         let node_i = 1;
 

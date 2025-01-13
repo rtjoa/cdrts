@@ -185,15 +185,24 @@ window.onload = () => {
         let state = peers.get(peer_id) as PeerState;
         let els = peer_elements.get(peer_id) as PeerElements;
 
+        const incomingSection = document.getElementById(`incoming-section${peer_id}`);
+        if (state.incoming_messages.length === 0) {
+            incomingSection?.classList.remove('has-messages');
+            return;
+        }
+        incomingSection?.classList.add('has-messages');
+
         els.incoming.innerHTML = '';
         state.incoming_messages.forEach((message, index) => {
             const messageDiv = document.createElement('div');
-            messageDiv.style.marginBottom = '10px';
+            messageDiv.className = 'message-container';
 
             const messageText = document.createElement('pre');
-            messageText.style.display = 'inline-block';
-            messageText.style.marginRight = '10px';
+            messageText.className = 'message-text';
             messageText.textContent = message.map(edit => repr_edit(edit)).join('\n');
+
+            const buttonGroup = document.createElement('div');
+            buttonGroup.className = 'button-group';
 
             const deliverButton = document.createElement('button');
             deliverButton.textContent = 'Deliver';
@@ -203,9 +212,10 @@ window.onload = () => {
             dropButton.textContent = 'Drop';
             dropButton.onclick = () => drop_message(peer_id, index);
 
+            buttonGroup.appendChild(deliverButton);
+            buttonGroup.appendChild(dropButton);
             messageDiv.appendChild(messageText);
-            messageDiv.appendChild(deliverButton);
-            messageDiv.appendChild(dropButton);
+            messageDiv.appendChild(buttonGroup);
             els.incoming.appendChild(messageDiv);
         });
     }

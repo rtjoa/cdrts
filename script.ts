@@ -179,12 +179,25 @@ class CRDTEditor {
     }
 
     private initializeUI(): void {
+        // Set initial text for Peer 1 before adding event listeners
+        const peer1Input = document.getElementById('input1') as HTMLTextAreaElement;
+        peer1Input.value = '+h+e+l+l+o';
+
+        // Set initial button states before adding event listeners
+        this.refreshTree(1);
+        this.refreshTree(2);
+        this.updateButtonStates(1);
+        this.updateButtonStates(2);
+
+        // Add event listeners after initial states are set
         document.getElementById('send1')?.addEventListener('click', () => this.commit(1));
         document.getElementById('send-tree1')?.addEventListener('click', () => this.sendTree(1));
         document.getElementById('send2')?.addEventListener('click', () => this.commit(2));
         document.getElementById('send-tree2')?.addEventListener('click', () => this.sendTree(2));
-        this.refreshTree(1);
-        this.refreshTree(2);
+
+        // Add input event listeners
+        document.getElementById('input1')?.addEventListener('input', () => this.updateButtonStates(1));
+        document.getElementById('input2')?.addEventListener('input', () => this.updateButtonStates(2));
     }
 
     private refreshTree(peer_id: number): void {
@@ -231,6 +244,7 @@ class CRDTEditor {
     private updateUI(state: PeerState, els: PeerElements): void {
         els.input.value = treeToString(state.root_id, state.tree_by_id).slice(1);
         els.tree.textContent = reprTree(state.root_id, state.tree_by_id, 0);
+        this.updateButtonStates(state.peer_id);
     }
 
     private updateIncomingMessages(peer_id: number): void {
@@ -425,6 +439,34 @@ class CRDTEditor {
             next_clock,
             non_tombstone_node_ids: [...non_tombstone_node_ids, nodes[node_i]]
         };
+    }
+
+    private hasEdits(peer_id: number): boolean {
+        const state = this.peers.get(peer_id) as PeerState;
+        const input = document.getElementById(`input${peer_id}`) as HTMLTextAreaElement;
+        const treeContent = treeToString(state.root_id, state.tree_by_id).slice(1); // slice(1) removes the '^'
+        return input.value !== treeContent;
+    }
+
+    private hasTreeChanges(state: PeerState): boolean {
+        // Check if tree has more than just the root sentinel node
+        return state.tree_by_id.size > 1;
+    }
+
+    private updateButtonStates(peer_id: number): void {
+        const state = this.peers.get(peer_id) as PeerState;
+        const commitButton = document.getElementById(`send${peer_id}`) as HTMLButtonElement;
+        const sendTreeButton = document.getElementById(`send-tree${peer_id}`) as HTMLButtonElement;
+
+        // Disable commit button if there are no edits
+        commitButton.disabled = !this.hasEdits(peer_id);
+
+        // Disable send tree button if there are no changes or only root node
+        sendTreeButton.disabled = !this.hasTreeChanges(state);
+
+        // Update button tooltips for better UX
+        commitButton.title = commitButton.disabled ? 'No changes to commit' : 'Commit changes';
+        sendTreeButton.title = sendTreeButton.disabled ? 'No tree changes to send' : 'Send tree state';
     }
 }
 

@@ -81,11 +81,21 @@
             cursor: pointer;
             font-size: 0.875rem;
             font-weight: 500;
-            transition: background-color 0.15s;
+            transition: background-color 0.15s, opacity 0.15s;
         }
 
         button:hover {
             background: var(--primary-hover);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            background: var(--primary-color);
+        }
+
+        button:disabled:hover {
+            background: var(--primary-color);
         }
 
         .error {
@@ -227,8 +237,8 @@
                 <div class="peer-title">Peer 1</div>
                 <div class="input-section">
                     <textarea id="input1"></textarea>
-                    <button id="send1">Commit Edits</button>
-                    <button id="send-tree1">Send Tree</button>
+                    <button id="send1" disabled>Commit Edits</button>
+                    <button id="send-tree1" disabled>Send Tree</button>
                     <div id="error1" class="error"></div>
                 </div>
                 <div class="section-title">Tree</div>
@@ -242,8 +252,8 @@
                 <div class="peer-title">Peer 2</div>
                 <div class="input-section">
                     <textarea id="input2"></textarea>
-                    <button id="send2">Commit Edits</button>
-                    <button id="send-tree2">Send Tree</button>
+                    <button id="send2" disabled>Commit Edits</button>
+                    <button id="send-tree2" disabled>Send Tree</button>
                     <div id="error2" class="error"></div>
                 </div>
                 <div class="section-title">Tree</div>

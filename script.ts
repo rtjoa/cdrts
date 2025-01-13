@@ -329,7 +329,7 @@ class CRDTEditor {
 
     private parseEdits(state: PeerState, text_with_edits: string): ParsedEdits {
         if (text_with_edits[0] !== '^') {
-            return { type: 'Error', message: "Error: need doc start." };
+            return { type: 'Error', message: "Invalid edit: Document must start with '^'" };
         }
 
         const nodes = preorderTree(state.root_id, state.tree_by_id);
@@ -389,6 +389,14 @@ class CRDTEditor {
         const char = text[text_i];
 
         if (char === '-') {
+            const nodeToDelete = non_tombstone_node_ids[non_tombstone_node_ids.length - 1];
+            if (nodeToDelete === state.root_id) {
+                return {
+                    error: "Invalid edit: Cannot delete the root node (^)",
+                    text_i, node_i, next_clock, non_tombstone_node_ids
+                };
+            }
+
             return {
                 text_i: text_i + 1,
                 node_i,
@@ -396,7 +404,7 @@ class CRDTEditor {
                 non_tombstone_node_ids: non_tombstone_node_ids.slice(0, -1),
                 edit: {
                     type: 'Delete',
-                    index: non_tombstone_node_ids[non_tombstone_node_ids.length - 1]
+                    index: nodeToDelete
                 }
             };
         }
@@ -404,7 +412,7 @@ class CRDTEditor {
         if (char === '+') {
             if (text_i + 1 >= text.length) {
                 return {
-                    error: "Error: Unmatched add marker found at the end of the text.",
+                    error: "Invalid edit: '+' must be followed by a character to insert",
                     text_i, node_i, next_clock, non_tombstone_node_ids
                 };
             }
@@ -430,7 +438,7 @@ class CRDTEditor {
 
         if (node_i >= nodes.length) {
             return {
-                error: "Error: text char but end of tree.",
+                error: "Invalid edit: Too many characters. The edit would make the text longer than the current tree structure.",
                 text_i, node_i, next_clock, non_tombstone_node_ids
             };
         }
@@ -438,7 +446,7 @@ class CRDTEditor {
         const node = state.tree_by_id.get(nodes[node_i]) as Tree;
         if (text[text_i] !== node.value) {
             return {
-                error: "Error: text char but tree char does not match.",
+                error: `Invalid edit: Expected '${node.value}' but found '${text[text_i]}'. Edits must match existing characters unless using '+' or '-'.`,
                 text_i, node_i, next_clock, non_tombstone_node_ids
             };
         }

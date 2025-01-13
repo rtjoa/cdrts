@@ -158,12 +158,12 @@
 
         .button-group {
             display: flex;
-            flex-direction: column;
+            flex-direction: row;
             gap: 0.5rem;
         }
 
         .button-group button {
-            width: 100%;
+            flex: 1;
         }
 
         @media (max-width: 768px) {
@@ -279,7 +279,7 @@
                 <div class="input-section">
                     <div id="editor1" class="editor" contenteditable="true"></div>
                     <textarea id="input1" style="display: none;"></textarea>
-                    <button id="send-tree1" disabled>Send Tree</button>
+                    <button id="send-tree1" disabled>Send Snapshot</button>
                     <div id="error1" class="error"></div>
                 </div>
                 <div class="section-title">Tree</div>
@@ -294,7 +294,7 @@
                 <div class="input-section">
                     <div id="editor2" class="editor" contenteditable="true"></div>
                     <textarea id="input2" style="display: none;"></textarea>
-                    <button id="send-tree2" disabled>Send Tree</button>
+                    <button id="send-tree2" disabled>Send Snapshot</button>
                     <div id="error2" class="error"></div>
                 </div>
                 <div class="section-title">Tree</div>

@@ -43,7 +43,19 @@ const merge = (state, edits) => {
             if (state.tree_by_id.has(edit.new_id))
                 return;
             const parent = state.tree_by_id.get(edit.parent);
-            const parent_updated = Object.assign(Object.assign({}, parent), { children: [...parent.children, edit.new_id].sort() });
+            const parent_updated = Object.assign(Object.assign({}, parent), { children: [...parent.children, edit.new_id].sort((id1, id2) => {
+                    // Sort by increasing peer id, then decreasing local id
+                    let [peer_id1, local_id1] = id1.split('/');
+                    let [peer_id2, local_id2] = id2.split('/');
+                    let peer_id1_num = parseInt(peer_id1);
+                    let peer_id2_num = parseInt(peer_id2);
+                    let local_id1_num = parseInt(local_id1);
+                    let local_id2_num = parseInt(local_id2);
+                    if (peer_id1_num !== peer_id2_num) {
+                        return peer_id1_num - peer_id2_num;
+                    }
+                    return local_id2_num - local_id1_num;
+                }) });
             state.tree_by_id.set(edit.parent, parent_updated);
             state.tree_by_id.set(edit.new_id, {
                 children: [],
@@ -175,7 +187,9 @@ class CRDTEditor {
         let non_tombstone_node_ids = [nodes[0]];
         let text_i = 1;
         let node_i = 1;
-        let next_local_id = state.next_local_id;
+        let num_additions = text_with_edits.split('+').length - 1;
+        let next_next_local_id = state.next_local_id + num_additions;
+        let next_local_id = next_next_local_id - 1;
         const edits = [];
         while (text_i < text_with_edits.length) {
             const result = this.parseEditToken(text_with_edits, text_i, node_i, state, nodes, non_tombstone_node_ids, next_local_id);
@@ -197,7 +211,7 @@ class CRDTEditor {
         if (node_i < nodes.length) {
             return { type: 'Error', message: "Error: tree char but no text char." };
         }
-        return { type: 'Ok', edits, next_local_id };
+        return { type: 'Ok', edits, next_local_id: next_next_local_id };
     }
     parseEditToken(text, text_i, node_i, state, nodes, non_tombstone_node_ids, next_local_id) {
         const char = text[text_i];
@@ -224,7 +238,7 @@ class CRDTEditor {
             return {
                 text_i: text_i + 2,
                 node_i,
-                next_local_id: next_local_id + 1,
+                next_local_id: next_local_id - 1,
                 non_tombstone_node_ids: [...non_tombstone_node_ids, new_id],
                 edit: {
                     type: 'Insert',

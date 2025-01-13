@@ -1,13 +1,13 @@
 "use strict";
 // Helper functions
-const mk_id = (peer_id, local_id) => `${peer_id}/${local_id}`;
+const mk_id = (peer_id, clock) => `${peer_id}/${clock}`;
 const init_state = (peer_id) => ({
     peer_id,
     root_id: mk_id(0, 0),
     tree_by_id: new Map([
         [mk_id(0, 0), { children: [], value: '^' }]
     ]),
-    next_local_id: 1,
+    next_clock: 1,
     incoming_messages: [],
 });
 const reprTree = (root_id, tree_by_id, indent) => {
@@ -39,14 +39,14 @@ const isNodeTombstone = (node_id, tree_by_id) => {
 };
 const compare_ids = (id1, id2) => {
     // Sort by decreasing local id (lamport clock), then by increasing peer id
-    let [peer_id1, local_id1] = id1.split('/');
-    let [peer_id2, local_id2] = id2.split('/');
+    let [peer_id1, clock1] = id1.split('/');
+    let [peer_id2, clock2] = id2.split('/');
     let peer_id1_num = parseInt(peer_id1);
     let peer_id2_num = parseInt(peer_id2);
-    let local_id1_num = parseInt(local_id1);
-    let local_id2_num = parseInt(local_id2);
-    if (local_id1_num !== local_id2_num) {
-        return local_id2_num - local_id1_num;
+    let clock1_num = parseInt(clock1);
+    let clock2_num = parseInt(clock2);
+    if (clock1_num !== clock2_num) {
+        return clock2_num - clock1_num;
     }
     return peer_id1_num - peer_id2_num;
 };
@@ -62,7 +62,7 @@ const mergeEdits = (state, edits) => {
                 children: [],
                 value: edit.value,
             });
-            state.next_local_id = Math.max(state.next_local_id, parseInt(edit.new_id.split('/')[1]) + 1);
+            state.next_clock = Math.max(state.next_clock, parseInt(edit.new_id.split('/')[1]) + 1);
         }
         else {
             const to_delete = state.tree_by_id.get(edit.index);
@@ -92,7 +92,7 @@ const combineTrees = (tree, existing) => {
 };
 const mergeTree = (state, incoming_tree_by_id) => {
     incoming_tree_by_id.forEach((tree, id) => {
-        state.next_local_id = Math.max(state.next_local_id, parseInt(id.split('/')[1]) + 1);
+        state.next_clock = Math.max(state.next_clock, parseInt(id.split('/')[1]) + 1);
         if (!state.tree_by_id.has(id)) {
             state.tree_by_id.set(id, tree);
         }
@@ -143,7 +143,7 @@ class CRDTEditor {
             els.error.textContent = edits.message;
             return;
         }
-        state.next_local_id = edits.next_local_id;
+        state.next_clock = edits.next_clock;
         els.error.textContent = '';
         if (edits.edits.length === 0)
             return;
@@ -235,12 +235,10 @@ class CRDTEditor {
         let non_tombstone_node_ids = [nodes[0]]; // stack to delete
         let text_i = 1;
         let node_i = 1;
-        let num_additions = text_with_edits.split('+').length - 1;
-        let next_next_local_id = state.next_local_id + num_additions;
-        let next_local_id = next_next_local_id - 1;
+        let next_clock = state.next_clock;
         const edits = [];
         while (text_i < text_with_edits.length) {
-            const result = this.parseEditToken(text_with_edits, text_i, node_i, state, nodes, non_tombstone_node_ids, next_local_id);
+            const result = this.parseEditToken(text_with_edits, text_i, node_i, state, nodes, non_tombstone_node_ids, next_clock);
             if (result.error) {
                 return { type: 'Error', message: result.error };
             }
@@ -248,7 +246,7 @@ class CRDTEditor {
                 edits.push(result.edit);
             text_i = result.text_i;
             node_i = result.node_i;
-            next_local_id = result.next_local_id;
+            next_clock = result.next_clock;
             non_tombstone_node_ids = result.non_tombstone_node_ids;
         }
         // Check for remaining non-tombstone nodes
@@ -259,15 +257,15 @@ class CRDTEditor {
         if (node_i < nodes.length) {
             return { type: 'Error', message: "Error: tree char but no text char." };
         }
-        return { type: 'Ok', edits, next_local_id: next_next_local_id };
+        return { type: 'Ok', edits, next_clock };
     }
-    parseEditToken(text, text_i, node_i, state, nodes, non_tombstone_node_ids, next_local_id) {
+    parseEditToken(text, text_i, node_i, state, nodes, non_tombstone_node_ids, next_clock) {
         const char = text[text_i];
         if (char === '-') {
             return {
                 text_i: text_i + 1,
                 node_i,
-                next_local_id,
+                next_clock,
                 non_tombstone_node_ids: non_tombstone_node_ids.slice(0, -1),
                 edit: {
                     type: 'Delete',
@@ -279,14 +277,14 @@ class CRDTEditor {
             if (text_i + 1 >= text.length) {
                 return {
                     error: "Error: Unmatched add marker found at the end of the text.",
-                    text_i, node_i, next_local_id, non_tombstone_node_ids
+                    text_i, node_i, next_clock, non_tombstone_node_ids
                 };
             }
-            const new_id = mk_id(state.peer_id, next_local_id);
+            const new_id = mk_id(state.peer_id, next_clock);
             return {
                 text_i: text_i + 2,
                 node_i,
-                next_local_id: next_local_id - 1,
+                next_clock: next_clock + 1,
                 non_tombstone_node_ids: [...non_tombstone_node_ids, new_id],
                 edit: {
                     type: 'Insert',
@@ -302,20 +300,20 @@ class CRDTEditor {
         if (node_i >= nodes.length) {
             return {
                 error: "Error: text char but end of tree.",
-                text_i, node_i, next_local_id, non_tombstone_node_ids
+                text_i, node_i, next_clock, non_tombstone_node_ids
             };
         }
         const node = state.tree_by_id.get(nodes[node_i]);
         if (text[text_i] !== node.value) {
             return {
                 error: "Error: text char but tree char does not match.",
-                text_i, node_i, next_local_id, non_tombstone_node_ids
+                text_i, node_i, next_clock, non_tombstone_node_ids
             };
         }
         return {
             text_i: text_i + 1,
             node_i: node_i + 1,
-            next_local_id,
+            next_clock,
             non_tombstone_node_ids: [...non_tombstone_node_ids, nodes[node_i]]
         };
     }

@@ -1,185 +1,233 @@
 "use strict";
-;
-let el_input1;
-let el_input2;
-let el_tree1;
-let el_tree2;
-let el_lastEdits1;
-let el_lastEdits2;
-let el_output;
-let el_updateButton;
-window.onload = () => {
-    el_input1 = document.getElementById('input1');
-    el_input2 = document.getElementById('input2');
-    el_tree1 = document.getElementById('tree1');
-    el_tree2 = document.getElementById('tree2');
-    el_lastEdits1 = document.getElementById('last-edits-1');
-    el_lastEdits2 = document.getElementById('last-edits-2');
-    el_output = document.getElementById('output');
-    el_updateButton = document.getElementById('updateButton');
-    el_updateButton.addEventListener('click', update);
-    el_input1.value = "";
-    el_input2.value = "";
-    update();
-};
+function mk_id(peer_id, local_id) {
+    return `${peer_id}/${local_id}`;
+}
 function init_state(peer_id) {
+    let tree_by_id = new Map();
+    let root_id = mk_id(0, 0);
+    tree_by_id.set(root_id, {
+        children: [],
+        value: '^'
+    });
     return {
         peer_id: peer_id,
-        tree: {
-            id: { peer_id: 0, local_id: 0 },
-            node: { type: 'Data', value: '^' },
-            children: []
-        },
-        next_id: 1,
+        root_id: root_id,
+        tree_by_id: tree_by_id,
+        next_local_id: 1,
+        incoming_messages: [],
     };
 }
 ;
-let state1 = init_state(1);
-let state2 = init_state(2);
-function update() {
-    el_tree1.textContent = repr_tree(state1.tree, 0);
-    el_tree2.textContent = repr_tree(state2.tree, 0);
-    let edits1 = parse_edits(state1, "^" + el_input1.value, state1.tree);
-    let edits2 = parse_edits(state2, "^" + el_input2.value, state2.tree);
-    el_lastEdits1.textContent = edits1 instanceof Array ? edits1.map(repr_edit).join('\n') : edits1;
-    el_lastEdits2.textContent = edits2 instanceof Array ? edits2.map(repr_edit).join('\n') : edits2;
-    if (edits1 instanceof Array && edits2 instanceof Array) {
-        state1.tree = merge(state1.tree, edits2);
-        state2.tree = merge(state2.tree, edits1);
+window.onload = () => {
+    var _a, _b;
+    let peers = new Map();
+    peers.set(1, init_state(1));
+    peers.set(2, init_state(2));
+    let peer_elements = new Map();
+    peer_elements.set(1, {
+        input: document.getElementById('input1'),
+        tree: document.getElementById('tree1'),
+        incoming: document.getElementById('incoming1'),
+        error: document.getElementById('error1'),
+    });
+    peer_elements.set(2, {
+        input: document.getElementById('input2'),
+        tree: document.getElementById('tree2'),
+        incoming: document.getElementById('incoming2'),
+        error: document.getElementById('error2'),
+    });
+    function refresh_tree(peer_id) {
+        let state = peers.get(peer_id);
+        let els = peer_elements.get(peer_id);
+        els.tree.textContent = repr_tree(state.root_id, state.tree_by_id, 0);
     }
-    let content1 = tree_to_string(state1.tree);
-    let content2 = tree_to_string(state2.tree);
-    if (content1 !== content2) {
-        el_output.textContent = "Conflict!\n" + content1 + "\n\n" + content2;
-    }
-    else {
-        el_output.textContent = content1;
-    }
-}
-function createIdMap(tree) {
-    const map = new Map();
-    function addToMap(node) {
-        const idKey = `${node.id.peer_id}/${node.id.local_id}`;
-        map.set(idKey, node);
-        for (const child of node.children) {
-            addToMap(child);
+    refresh_tree(1);
+    refresh_tree(2);
+    function commit(peer_id) {
+        let state = peers.get(peer_id);
+        let els = peer_elements.get(peer_id);
+        let edits = parse_edits(state, "^" + els.input.value);
+        if (edits.type === 'Error') {
+            els.error.textContent = edits.message;
+            return;
         }
-    }
-    addToMap(tree);
-    return map;
-}
-function merge(tree, edits) {
-    let id_map = createIdMap(tree);
-    return tree;
-}
-// Root is always a tombstone with id 0
-/* Human-readable string representation of a tree */
-function repr_tree(tree, indent) {
-    let sHere = tree.id.peer_id + '/' + tree.id.local_id + ' ' + (tree.node.type === 'Data' ? tree.node.value : '<Tombstone>');
-    let result = '  '.repeat(indent) + sHere + '\n';
-    for (const child of tree.children) {
-        result += repr_tree(child, indent + 1);
-    }
-    return result;
-}
-/* Concats tree contents in pre-order */
-function tree_to_string(tree) {
-    let result = tree.node.type === 'Data' ? tree.node.value : '';
-    for (const child of tree.children) {
-        result += tree_to_string(child);
-    }
-    return result;
-}
-function preorder_tree(tree) {
-    let result = [];
-    result.push(tree);
-    for (const child of tree.children) {
-        result = result.concat(preorder_tree(child));
-    }
-    return result;
-}
-function repr_edit(edit) {
-    if (edit.type === 'Insert') {
-        let new_node = edit.node.node;
-        return "after " + edit.parent.peer_id + '/' + edit.parent.local_id + ' ' + new_node.value;
-    }
-    else {
-        return "del " + edit.index.peer_id + '/' + edit.index.local_id;
-    }
-}
-/*
-Edit syntax is as follows:
-
-If the current text is "hello world"
-
-The following is an insertion of "ab" at index 6:
-hello +a+bworld
-
-The following is a deletion of "world":
-hello -w-o-r-l-d
-
-The new text without the edits must match the old tree as a string.
-If not, it gives an error.
- */
-function parse_edits(state, text_with_edits, tree) {
-    let edits = [];
-    let nodes = preorder_tree(tree);
-    if (text_with_edits[0] !== '^') {
-        return "Error: need doc start.";
-    }
-    let non_tombstone_node_ids = [nodes[0].id];
-    let text_i = 1;
-    let node_i = 1;
-    while (text_i < text_with_edits.length) {
-        if (text_with_edits[text_i] === '-') {
-            edits.push({
-                type: 'Delete',
-                index: non_tombstone_node_ids[non_tombstone_node_ids.length - 1],
-            });
-            non_tombstone_node_ids.pop();
-            text_i++;
+        els.error.textContent = '';
+        if (edits.edits.length === 0) {
+            return;
         }
-        else if (text_with_edits[text_i] == "+") {
-            if (text_i + 1 >= text_with_edits.length) {
-                return "Error: Unmatched add marker found at the end of the text.";
+        merge(state, edits.edits);
+        for (const other_peer_id of [1, 2]) {
+            if (other_peer_id !== peer_id) {
+                let other = peers.get(other_peer_id);
+                other.incoming_messages.push(edits.edits);
+                update_incoming_messages(other_peer_id);
             }
-            let new_node = {
-                id: { peer_id: state.peer_id, local_id: state.next_id },
-                node: {
-                    type: 'Data',
-                    value: text_with_edits[text_i + 1]
-                },
-                children: [],
-            };
-            state.next_id++;
-            edits.push({
-                type: "Insert",
-                parent: non_tombstone_node_ids[non_tombstone_node_ids.length - 1],
-                node: new_node,
-            });
-            non_tombstone_node_ids.push(new_node.id);
-            text_i += 2;
+        }
+        els.input.value = tree_to_string(state.root_id, state.tree_by_id).slice(1);
+        els.tree.textContent = repr_tree(state.root_id, state.tree_by_id, 0);
+    }
+    function deliver_message(peer_id, message_index) {
+        let state = peers.get(peer_id);
+        let els = peer_elements.get(peer_id);
+        let edits = state.incoming_messages[message_index];
+        merge(state, edits);
+        els.tree.textContent = repr_tree(state.root_id, state.tree_by_id, 0);
+        els.input.value = tree_to_string(state.root_id, state.tree_by_id).slice(1);
+        els.tree.textContent = repr_tree(state.root_id, state.tree_by_id, 0);
+    }
+    function drop_message(peer_id, message_index) {
+        let state = peers.get(peer_id);
+        state.incoming_messages = state.incoming_messages.slice(0, message_index).concat(state.incoming_messages.slice(message_index + 1));
+        update_incoming_messages(peer_id);
+    }
+    function merge(state, edits) {
+        for (const edit of edits) {
+            if (edit.type === 'Insert') {
+                // Do nothing if the node is already in the tree
+                if (state.tree_by_id.has(edit.new_id)) {
+                    continue;
+                }
+                // Update parent's children
+                let parent = state.tree_by_id.get(edit.parent);
+                let parent_updated = Object.assign({}, parent);
+                parent_updated.children.push(edit.new_id);
+                parent_updated.children.sort();
+                state.tree_by_id.set(edit.parent, parent_updated);
+                // Add the new node
+                state.tree_by_id.set(edit.new_id, {
+                    children: [],
+                    value: edit.value,
+                });
+            }
+            else {
+                let to_delete = state.tree_by_id.get(edit.index);
+                state.tree_by_id.set(edit.index, {
+                    children: to_delete.children,
+                    value: undefined,
+                });
+            }
+        }
+    }
+    /* Human-readable string representation of a tree */
+    function repr_tree(root_id, tree_by_id, indent) {
+        var _a;
+        let root = tree_by_id.get(root_id);
+        let sHere = root_id + ' ' + ((_a = root.value) !== null && _a !== void 0 ? _a : '<Tombstone>');
+        let result = '  '.repeat(indent) + sHere + '\n';
+        for (const child of root.children) {
+            result += repr_tree(child, tree_by_id, indent + 1);
+        }
+        return result;
+    }
+    // Concats tree contents in pre-order
+    function tree_to_string(root_id, tree_by_id) {
+        var _a;
+        let root = tree_by_id.get(root_id);
+        let result = (_a = root.value) !== null && _a !== void 0 ? _a : '';
+        for (const child of root.children) {
+            result += tree_to_string(child, tree_by_id);
+        }
+        return result;
+    }
+    function preorder_tree(root_id, tree_by_id) {
+        let root = tree_by_id.get(root_id);
+        let result = [];
+        result.push(root_id);
+        for (const child of root.children) {
+            result = result.concat(preorder_tree(child, tree_by_id));
+        }
+        return result;
+    }
+    function repr_edit(edit) {
+        if (edit.type === 'Insert') {
+            return `after ${edit.parent} ins ${edit.new_id} ${edit.value}`;
         }
         else {
-            while (node_i + 1 < nodes.length && nodes[node_i + 1].node.type === 'Tombstone') {
-                node_i++;
-            }
-            if (node_i >= nodes.length) {
-                return "Error: text char but end of tree.";
-            }
-            let node = nodes[node_i].node;
-            if (text_with_edits[text_i] !== node.value) {
-                return "Error: text char but tree char does not match.";
-            }
-            text_i++;
-            node_i++;
+            return `del ${edit.index}`;
         }
     }
-    while (node_i < nodes.length && nodes[node_i].node.type === 'Tombstone') {
-        node_i++;
+    function update_incoming_messages(peer_id) {
+        let state = peers.get(peer_id);
+        let els = peer_elements.get(peer_id);
+        els.incoming.innerHTML = '';
+        state.incoming_messages.forEach((message, index) => {
+            const messageDiv = document.createElement('div');
+            messageDiv.style.marginBottom = '10px';
+            const messageText = document.createElement('pre');
+            messageText.style.display = 'inline-block';
+            messageText.style.marginRight = '10px';
+            messageText.textContent = message.map(edit => repr_edit(edit)).join('\n');
+            const deliverButton = document.createElement('button');
+            deliverButton.textContent = 'Deliver';
+            deliverButton.onclick = () => deliver_message(peer_id, index);
+            const dropButton = document.createElement('button');
+            dropButton.textContent = 'Drop';
+            dropButton.onclick = () => drop_message(peer_id, index);
+            messageDiv.appendChild(messageText);
+            messageDiv.appendChild(deliverButton);
+            messageDiv.appendChild(dropButton);
+            els.incoming.appendChild(messageDiv);
+        });
     }
-    if (node_i < nodes.length) {
-        return "Error: tree char but no text char.";
+    function parse_edits(state, text_with_edits) {
+        var _a, _b;
+        let edits = [];
+        let nodes = preorder_tree(state.root_id, state.tree_by_id);
+        if (text_with_edits[0] !== '^') {
+            return { type: 'Error', message: "Error: need doc start." };
+        }
+        let non_tombstone_node_ids = [nodes[0]];
+        let text_i = 1;
+        let node_i = 1;
+        let next_local_id = state.next_local_id;
+        while (text_i < text_with_edits.length) {
+            if (text_with_edits[text_i] === '-') {
+                edits.push({
+                    type: 'Delete',
+                    index: non_tombstone_node_ids[non_tombstone_node_ids.length - 1],
+                });
+                non_tombstone_node_ids.pop();
+                text_i++;
+            }
+            else if (text_with_edits[text_i] == "+") {
+                if (text_i + 1 >= text_with_edits.length) {
+                    return { type: 'Error', message: "Error: Unmatched add marker found at the end of the text." };
+                }
+                let new_id = mk_id(state.peer_id, next_local_id);
+                edits.push({
+                    type: "Insert",
+                    parent: non_tombstone_node_ids[non_tombstone_node_ids.length - 1],
+                    new_id: mk_id(state.peer_id, next_local_id),
+                    value: text_with_edits[text_i + 1]
+                });
+                non_tombstone_node_ids.push(new_id);
+                next_local_id++;
+                text_i += 2;
+            }
+            else {
+                while (node_i < nodes.length && ((_a = state.tree_by_id.get(nodes[node_i])) === null || _a === void 0 ? void 0 : _a.value) === undefined) {
+                    node_i++;
+                }
+                if (node_i >= nodes.length) {
+                    return { type: 'Error', message: "Error: text char but end of tree." };
+                }
+                let node = state.tree_by_id.get(nodes[node_i]);
+                if (text_with_edits[text_i] !== node.value) {
+                    return { type: 'Error', message: "Error: text char but tree char does not match." };
+                }
+                non_tombstone_node_ids.push(nodes[node_i]);
+                text_i++;
+                node_i++;
+            }
+        }
+        while (node_i < nodes.length && ((_b = state.tree_by_id.get(nodes[node_i])) === null || _b === void 0 ? void 0 : _b.value) === undefined) {
+            node_i++;
+        }
+        if (node_i < nodes.length) {
+            return { type: 'Error', message: "Error: tree char but no text char." };
+        }
+        return { type: 'Ok', edits: edits, next_local_id: next_local_id };
     }
-    return edits;
-}
+    (_a = document.getElementById('send1')) === null || _a === void 0 ? void 0 : _a.addEventListener('click', () => commit(1));
+    (_b = document.getElementById('send2')) === null || _b === void 0 ? void 0 : _b.addEventListener('click', () => commit(2));
+};

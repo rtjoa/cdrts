@@ -17,7 +17,7 @@ interface PeerState {
     next_local_id: number;
     tree_by_id: Map<string, Tree>;
     root_id: string;
-    incoming_messages: Edit[][];
+    incoming_messages: (Edit[] | Map<string, Tree>)[];
 }
 
 interface PeerElements {
@@ -81,7 +81,21 @@ const isNodeTombstone = (node_id: string, tree_by_id: Map<string, Tree>): boolea
     return tree_by_id.get(node_id)?.value === undefined;
 };
 
-const merge = (state: PeerState, edits: Edit[]): void => {
+const compare_ids = (id1: string, id2: string): number => {
+    // Sort by increasing peer id, then decreasing local id
+    let [peer_id1, local_id1] = id1.split('/');
+    let [peer_id2, local_id2] = id2.split('/');
+    let peer_id1_num = parseInt(peer_id1);
+    let peer_id2_num = parseInt(peer_id2);
+    let local_id1_num = parseInt(local_id1);
+    let local_id2_num = parseInt(local_id2);
+    if (peer_id1_num !== peer_id2_num) {
+        return peer_id1_num - peer_id2_num;
+    }
+    return local_id2_num - local_id1_num;
+}
+
+const mergeEdits = (state: PeerState, edits: Edit[]): void => {
     edits.forEach(edit => {
         if (edit.type === 'Insert') {
             if (state.tree_by_id.has(edit.new_id)) return;
@@ -89,19 +103,7 @@ const merge = (state: PeerState, edits: Edit[]): void => {
             const parent = state.tree_by_id.get(edit.parent) as Tree;
             const parent_updated = {
                 ...parent,
-                children: [...parent.children, edit.new_id].sort((id1, id2) => {
-                    // Sort by increasing peer id, then decreasing local id
-                    let [peer_id1, local_id1] = id1.split('/');
-                    let [peer_id2, local_id2] = id2.split('/');
-                    let peer_id1_num = parseInt(peer_id1);
-                    let peer_id2_num = parseInt(peer_id2);
-                    let local_id1_num = parseInt(local_id1);
-                    let local_id2_num = parseInt(local_id2);
-                    if (peer_id1_num !== peer_id2_num) {
-                        return peer_id1_num - peer_id2_num;
-                    }
-                    return local_id2_num - local_id1_num;
-                })
+                children: [...parent.children, edit.new_id].sort(compare_ids)
             };
 
             state.tree_by_id.set(edit.parent, parent_updated);
@@ -119,6 +121,32 @@ const merge = (state: PeerState, edits: Edit[]): void => {
     });
 }
 
+const combineTrees = (tree: Tree, existing: Tree): Tree => {
+    let children = [...new Set([...existing.children, ...tree.children])];
+    children.sort(compare_ids);
+    let value = undefined;
+    if (tree.value !== undefined && existing.value !== undefined) {
+        if (tree.value === existing.value) {
+            value = tree.value;
+        } else {
+            value = "<CONFLICT (bug)|" + tree.value + "|" + existing.value + ">";
+        }
+    }
+    return {
+        children,
+        value,
+    };
+}
+
+const mergeTree = (state: PeerState, incoming_tree_by_id: Map<string, Tree>): void => {
+    incoming_tree_by_id.forEach((tree, id) => {
+        if (!state.tree_by_id.has(id)) {
+            state.tree_by_id.set(id, tree);
+        } else {
+            state.tree_by_id.set(id, combineTrees(tree, state.tree_by_id.get(id) as Tree));
+        }
+    });
+}
 
 class CRDTEditor {
     private peers: Map<number, PeerState>;
@@ -149,7 +177,9 @@ class CRDTEditor {
 
     private initializeUI(): void {
         document.getElementById('send1')?.addEventListener('click', () => this.commit(1));
+        document.getElementById('send-tree1')?.addEventListener('click', () => this.sendTree(1));
         document.getElementById('send2')?.addEventListener('click', () => this.commit(2));
+        document.getElementById('send-tree2')?.addEventListener('click', () => this.sendTree(2));
         this.refreshTree(1);
         this.refreshTree(2);
     }
@@ -174,16 +204,22 @@ class CRDTEditor {
         els.error.textContent = '';
         if (edits.edits.length === 0) return;
 
-        merge(state, edits.edits);
+        mergeEdits(state, edits.edits);
         this.broadcastEdits(peer_id, edits.edits);
         this.updateUI(state, els);
     }
 
-    private broadcastEdits(sender_id: number, edits: Edit[]): void {
+    private sendTree(peer_id: number): void {
+        const state = this.peers.get(peer_id) as PeerState;
+        let copied_tree_by_id = new Map(state.tree_by_id);
+        this.broadcastEdits(peer_id, copied_tree_by_id);
+    }
+
+    private broadcastEdits(sender_id: number, message: Edit[] | Map<string, Tree>): void {
         [1, 2].forEach(peer_id => {
             if (peer_id !== sender_id) {
                 const peer = this.peers.get(peer_id) as PeerState;
-                peer.incoming_messages.push(edits);
+                peer.incoming_messages.push(message);
                 this.updateIncomingMessages(peer_id);
             }
         });
@@ -213,13 +249,18 @@ class CRDTEditor {
         });
     }
 
-    private createMessageElement(message: Edit[], peer_id: number, index: number): HTMLDivElement {
+    private createMessageElement(message: Edit[] | Map<string, Tree>, peer_id: number, index: number): HTMLDivElement {
         const messageDiv = document.createElement('div');
         messageDiv.className = 'message-container';
 
         const messageText = document.createElement('pre');
         messageText.className = 'message-text';
-        messageText.textContent = message.map(edit => reprEdit(edit)).join('\n');
+        if (message instanceof Map) {
+            let state = this.peers.get(peer_id) as PeerState;
+            messageText.textContent = reprTree(state.root_id, message, 0);
+        } else {
+            messageText.textContent = message.map(edit => reprEdit(edit)).join('\n');
+        }
 
         const buttonGroup = document.createElement('div');
         buttonGroup.className = 'button-group';
@@ -242,7 +283,11 @@ class CRDTEditor {
         const state = this.peers.get(peer_id) as PeerState;
         const els = this.peer_elements.get(peer_id) as PeerElements;
 
-        merge(state, state.incoming_messages[message_index]);
+        if (state.incoming_messages[message_index] instanceof Map) {
+            mergeTree(state, state.incoming_messages[message_index]);
+        } else {
+            mergeEdits(state, state.incoming_messages[message_index]);
+        }
         this.updateUI(state, els);
     }
 

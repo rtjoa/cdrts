@@ -37,25 +37,26 @@ const isNodeTombstone = (node_id, tree_by_id) => {
     var _a;
     return ((_a = tree_by_id.get(node_id)) === null || _a === void 0 ? void 0 : _a.value) === undefined;
 };
-const merge = (state, edits) => {
+const compare_ids = (id1, id2) => {
+    // Sort by increasing peer id, then decreasing local id
+    let [peer_id1, local_id1] = id1.split('/');
+    let [peer_id2, local_id2] = id2.split('/');
+    let peer_id1_num = parseInt(peer_id1);
+    let peer_id2_num = parseInt(peer_id2);
+    let local_id1_num = parseInt(local_id1);
+    let local_id2_num = parseInt(local_id2);
+    if (peer_id1_num !== peer_id2_num) {
+        return peer_id1_num - peer_id2_num;
+    }
+    return local_id2_num - local_id1_num;
+};
+const mergeEdits = (state, edits) => {
     edits.forEach(edit => {
         if (edit.type === 'Insert') {
             if (state.tree_by_id.has(edit.new_id))
                 return;
             const parent = state.tree_by_id.get(edit.parent);
-            const parent_updated = Object.assign(Object.assign({}, parent), { children: [...parent.children, edit.new_id].sort((id1, id2) => {
-                    // Sort by increasing peer id, then decreasing local id
-                    let [peer_id1, local_id1] = id1.split('/');
-                    let [peer_id2, local_id2] = id2.split('/');
-                    let peer_id1_num = parseInt(peer_id1);
-                    let peer_id2_num = parseInt(peer_id2);
-                    let local_id1_num = parseInt(local_id1);
-                    let local_id2_num = parseInt(local_id2);
-                    if (peer_id1_num !== peer_id2_num) {
-                        return peer_id1_num - peer_id2_num;
-                    }
-                    return local_id2_num - local_id1_num;
-                }) });
+            const parent_updated = Object.assign(Object.assign({}, parent), { children: [...parent.children, edit.new_id].sort(compare_ids) });
             state.tree_by_id.set(edit.parent, parent_updated);
             state.tree_by_id.set(edit.new_id, {
                 children: [],
@@ -68,6 +69,33 @@ const merge = (state, edits) => {
                 children: to_delete.children,
                 value: undefined,
             });
+        }
+    });
+};
+const combineTrees = (tree, existing) => {
+    let children = [...new Set([...existing.children, ...tree.children])];
+    children.sort(compare_ids);
+    let value = undefined;
+    if (tree.value !== undefined && existing.value !== undefined) {
+        if (tree.value === existing.value) {
+            value = tree.value;
+        }
+        else {
+            value = "<CONFLICT (bug)|" + tree.value + "|" + existing.value + ">";
+        }
+    }
+    return {
+        children,
+        value,
+    };
+};
+const mergeTree = (state, incoming_tree_by_id) => {
+    incoming_tree_by_id.forEach((tree, id) => {
+        if (!state.tree_by_id.has(id)) {
+            state.tree_by_id.set(id, tree);
+        }
+        else {
+            state.tree_by_id.set(id, combineTrees(tree, state.tree_by_id.get(id)));
         }
     });
 };
@@ -92,9 +120,11 @@ class CRDTEditor {
         };
     }
     initializeUI() {
-        var _a, _b;
+        var _a, _b, _c, _d;
         (_a = document.getElementById('send1')) === null || _a === void 0 ? void 0 : _a.addEventListener('click', () => this.commit(1));
-        (_b = document.getElementById('send2')) === null || _b === void 0 ? void 0 : _b.addEventListener('click', () => this.commit(2));
+        (_b = document.getElementById('send-tree1')) === null || _b === void 0 ? void 0 : _b.addEventListener('click', () => this.sendTree(1));
+        (_c = document.getElementById('send2')) === null || _c === void 0 ? void 0 : _c.addEventListener('click', () => this.commit(2));
+        (_d = document.getElementById('send-tree2')) === null || _d === void 0 ? void 0 : _d.addEventListener('click', () => this.sendTree(2));
         this.refreshTree(1);
         this.refreshTree(2);
     }
@@ -115,15 +145,20 @@ class CRDTEditor {
         els.error.textContent = '';
         if (edits.edits.length === 0)
             return;
-        merge(state, edits.edits);
+        mergeEdits(state, edits.edits);
         this.broadcastEdits(peer_id, edits.edits);
         this.updateUI(state, els);
     }
-    broadcastEdits(sender_id, edits) {
+    sendTree(peer_id) {
+        const state = this.peers.get(peer_id);
+        let copied_tree_by_id = new Map(state.tree_by_id);
+        this.broadcastEdits(peer_id, copied_tree_by_id);
+    }
+    broadcastEdits(sender_id, message) {
         [1, 2].forEach(peer_id => {
             if (peer_id !== sender_id) {
                 const peer = this.peers.get(peer_id);
-                peer.incoming_messages.push(edits);
+                peer.incoming_messages.push(message);
                 this.updateIncomingMessages(peer_id);
             }
         });
@@ -152,7 +187,13 @@ class CRDTEditor {
         messageDiv.className = 'message-container';
         const messageText = document.createElement('pre');
         messageText.className = 'message-text';
-        messageText.textContent = message.map(edit => reprEdit(edit)).join('\n');
+        if (message instanceof Map) {
+            let state = this.peers.get(peer_id);
+            messageText.textContent = reprTree(state.root_id, message, 0);
+        }
+        else {
+            messageText.textContent = message.map(edit => reprEdit(edit)).join('\n');
+        }
         const buttonGroup = document.createElement('div');
         buttonGroup.className = 'button-group';
         const deliverButton = document.createElement('button');
@@ -168,7 +209,12 @@ class CRDTEditor {
     deliverMessage(peer_id, message_index) {
         const state = this.peers.get(peer_id);
         const els = this.peer_elements.get(peer_id);
-        merge(state, state.incoming_messages[message_index]);
+        if (state.incoming_messages[message_index] instanceof Map) {
+            mergeTree(state, state.incoming_messages[message_index]);
+        }
+        else {
+            mergeEdits(state, state.incoming_messages[message_index]);
+        }
         this.updateUI(state, els);
     }
     dropMessage(peer_id, message_index) {

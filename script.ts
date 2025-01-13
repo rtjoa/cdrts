@@ -199,6 +199,7 @@ class CRDTEditor {
 
         // Add initial "hello" text for peer 1
         const initialText = "hello";
+        const initialEdits: Edit[] = [];
         initialText.split('').forEach(char => {
             const edit: Edit = {
                 type: 'Insert',
@@ -206,9 +207,11 @@ class CRDTEditor {
                 new_id: mk_id(1, peer1State.next_clock++),
                 value: char
             };
+            initialEdits.push(edit);
             mergeEdits(peer1State, [edit]);
             peer1State.cursor_node = edit.new_id;
         });
+        this.broadcastEdits(1, initialEdits);
 
         // Set initial button states and refresh displays
         this.refreshTree(1);
@@ -222,7 +225,6 @@ class CRDTEditor {
         [1, 2].forEach(peer_id => {
             const els = this.peer_elements.get(peer_id) as PeerElements;
 
-            document.getElementById(`send${peer_id}`)?.addEventListener('click', () => this.commit(peer_id));
             document.getElementById(`send-tree${peer_id}`)?.addEventListener('click', () => this.sendTree(peer_id));
 
             els.editor.addEventListener('input', (e: Event) => {
@@ -249,6 +251,7 @@ class CRDTEditor {
             };
             mergeEdits(state, [edit]);
             state.cursor_node = edit.new_id;
+            this.broadcastEdits(peer_id, [edit]);
             this.updateUI(state, els);
             this.updateEditorContent(peer_id);
             this.setCaretPosition(peer_id);
@@ -274,6 +277,7 @@ class CRDTEditor {
             }
 
             mergeEdits(state, [edit]);
+            this.broadcastEdits(peer_id, [edit]);
             this.updateUI(state, els);
             this.updateEditorContent(peer_id);
             this.setCaretPosition(peer_id);
@@ -371,25 +375,6 @@ class CRDTEditor {
         const state = this.peers.get(peer_id) as PeerState;
         const els = this.peer_elements.get(peer_id) as PeerElements;
         els.tree.textContent = reprTree(state.root_id, state.tree_by_id, 0);
-    }
-
-    private commit(peer_id: number): void {
-        const state = this.peers.get(peer_id) as PeerState;
-        const els = this.peer_elements.get(peer_id) as PeerElements;
-
-        const edits = this.parseEdits(state, "^" + els.input.value);
-        if (edits.type === 'Error') {
-            els.error.textContent = edits.message;
-            return;
-        }
-
-        state.next_clock = edits.next_clock;
-        els.error.textContent = '';
-        if (edits.edits.length === 0) return;
-
-        mergeEdits(state, edits.edits);
-        this.broadcastEdits(peer_id, edits.edits);
-        this.updateUI(state, els);
     }
 
     private sendTree(peer_id: number): void {
@@ -638,17 +623,12 @@ class CRDTEditor {
 
     private updateButtonStates(peer_id: number): void {
         const state = this.peers.get(peer_id) as PeerState;
-        const commitButton = document.getElementById(`send${peer_id}`) as HTMLButtonElement;
         const sendTreeButton = document.getElementById(`send-tree${peer_id}`) as HTMLButtonElement;
-
-        // Disable commit button if there are no edits
-        commitButton.disabled = !this.hasEdits(peer_id);
 
         // Disable send tree button if there are no changes or only root node
         sendTreeButton.disabled = !this.hasTreeChanges(state);
 
         // Update button tooltips for better UX
-        commitButton.title = commitButton.disabled ? 'No changes to commit' : 'Commit changes';
         sendTreeButton.title = sendTreeButton.disabled ? 'No tree changes to send' : 'Send tree state';
     }
 }

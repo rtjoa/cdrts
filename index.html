@@ -279,7 +279,6 @@
                 <div class="input-section">
                     <div id="editor1" class="editor" contenteditable="true"></div>
                     <textarea id="input1" style="display: none;"></textarea>
-                    <button id="send1" disabled>Commit Edits</button>
                     <button id="send-tree1" disabled>Send Tree</button>
                     <div id="error1" class="error"></div>
                 </div>
@@ -295,7 +294,6 @@
                 <div class="input-section">
                     <div id="editor2" class="editor" contenteditable="true"></div>
                     <textarea id="input2" style="display: none;"></textarea>
-                    <button id="send2" disabled>Commit Edits</button>
                     <button id="send-tree2" disabled>Send Tree</button>
                     <div id="error2" class="error"></div>
                 </div>
@@ -310,7 +308,7 @@
         <div class="description">
             <h2>Instructions</h2>
             <p>This demo implements a tree-based CRDT for collaborative text editing. Each peer maintains their own copy
-                of the text and can make local edits that are eventually synchronized.</p>
+                of the text and can make local edits that are automatically synchronized with other peers.</p>
             <p>
                 Inspired by <a href="https://www.madebyevan.com/algos/crdt-tree-based-indexing/">Evan Wallace's
                     tree-based

@@ -283,7 +283,7 @@ class CRDTEditor {
         buttonGroup.className = 'button-group';
 
         const deliverButton = document.createElement('button');
-        deliverButton.textContent = 'Deliver';
+        deliverButton.textContent = 'Process';
         deliverButton.onclick = () => this.deliverMessage(peer_id, index);
 
         const dropButton = document.createElement('button');

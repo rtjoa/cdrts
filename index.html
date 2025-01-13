@@ -284,7 +284,7 @@
                 </div>
             </div>
 
-            <h3>Node IDs</h3>
+            <h3>Tree Representation</h3>
             <p>Node IDs are formatted as <code>peer_id/clock</code>. The clock is a <a
                     href="https://en.wikipedia.org/wiki/Lamport_timestamp">Lamport timestamp</a>.
                 Each fresh timestamp is the first natural number greater than all timestamps the peer has seen so far.
@@ -292,6 +292,9 @@
             <p>
                 Because insertions are of the form "insert after X," multiple children of the same node are displayed in
                 order of decreasing timestamp (we arbitrarily break ties by peer id).
+            </p>
+            <p>
+                All trees have a hidden sentinel node <code>^</code> at the root.
             </p>
         </div>
     </div>

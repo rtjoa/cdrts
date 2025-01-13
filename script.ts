@@ -417,6 +417,14 @@ class CRDTEditor {
                 };
             }
 
+            const charToInsert = text[text_i + 1];
+            if (charToInsert === '+' || charToInsert === '-') {
+                return {
+                    error: `Invalid edit: Cannot insert special characters '+' or '-'`,
+                    text_i, node_i, next_clock, non_tombstone_node_ids
+                };
+            }
+
             const new_id = mk_id(state.peer_id, next_clock);
             return {
                 text_i: text_i + 2,
@@ -427,7 +435,7 @@ class CRDTEditor {
                     type: 'Insert',
                     parent: non_tombstone_node_ids[non_tombstone_node_ids.length - 1],
                     new_id,
-                    value: text[text_i + 1]
+                    value: charToInsert
                 }
             };
         }

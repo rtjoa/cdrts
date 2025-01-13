@@ -197,8 +197,8 @@ class CRDTEditor {
         const peer1State = this.peers.get(1) as PeerState;
         const peer1Els = this.peer_elements.get(1) as PeerElements;
 
-        // Add initial "hello" text for peer 1
-        const initialText = "hello";
+        // Add initial text for peer 1
+        const initialText = "";
         const initialEdits: Edit[] = [];
         initialText.split('').forEach(char => {
             const edit: Edit = {
@@ -211,7 +211,9 @@ class CRDTEditor {
             mergeEdits(peer1State, [edit]);
             peer1State.cursor_node = edit.new_id;
         });
-        this.broadcastEdits(1, initialEdits);
+        if (initialEdits.length > 0) {
+            this.broadcastEdits(1, initialEdits);
+        }
 
         // Set initial button states and refresh displays
         this.refreshTree(1);

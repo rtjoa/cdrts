@@ -152,8 +152,12 @@
 
         .button-group {
             display: flex;
-            flex-wrap: wrap;
+            flex-direction: column;
             gap: 0.5rem;
+        }
+
+        .button-group button {
+            width: 100%;
         }
 
         @media (max-width: 768px) {

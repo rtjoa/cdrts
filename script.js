@@ -10,6 +10,7 @@ const init_state = (peer_id) => ({
     next_clock: 1,
     incoming_messages: [],
     cursor_node: mk_id(0, 0), // Start cursor at root
+    pending_timeouts: [],
 });
 const escapeSpecialChars = (str) => {
     return str
@@ -22,6 +23,9 @@ const escapeSpecialChars = (str) => {
 };
 const reprTree = (root_id, tree_by_id, indent) => {
     const root = tree_by_id.get(root_id);
+    if (!root) {
+        return `${' '.repeat(indent)}${root_id} <Missing>\n`;
+    }
     const indentation = '  '.repeat(indent);
     const nodeValue = root.value !== undefined ? escapeSpecialChars(root.value) : '<Tombstone>';
     const result = `${indentation}${root_id} ${nodeValue}\n`;
@@ -30,11 +34,15 @@ const reprTree = (root_id, tree_by_id, indent) => {
 const treeToString = (root_id, tree_by_id) => {
     var _a;
     const root = tree_by_id.get(root_id);
+    if (!root)
+        return '';
     const value = (_a = root.value) !== null && _a !== void 0 ? _a : '';
     return root.children.reduce((acc, child) => acc + treeToString(child, tree_by_id), value);
 };
 const preorderTree = (root_id, tree_by_id) => {
     const root = tree_by_id.get(root_id);
+    if (!root)
+        return [root_id];
     return root.children.reduce((acc, child) => [...acc, ...preorderTree(child, tree_by_id)], [root_id]);
 };
 const reprEdit = (edit) => {
@@ -65,6 +73,10 @@ const mergeEdits = (state, edits) => {
             if (state.tree_by_id.has(edit.new_id))
                 return;
             const parent = state.tree_by_id.get(edit.parent);
+            if (!parent) {
+                console.error(`Parent node ${edit.parent} not found for insertion of ${edit.new_id}`);
+                return;
+            }
             const parent_updated = Object.assign(Object.assign({}, parent), { children: [...parent.children, edit.new_id].sort(compare_ids) });
             state.tree_by_id.set(edit.parent, parent_updated);
             state.tree_by_id.set(edit.new_id, {
@@ -75,6 +87,10 @@ const mergeEdits = (state, edits) => {
         }
         else {
             const to_delete = state.tree_by_id.get(edit.index);
+            if (!to_delete) {
+                console.error(`Node ${edit.index} not found for deletion`);
+                return;
+            }
             state.tree_by_id.set(edit.index, {
                 children: to_delete.children,
                 value: undefined,
@@ -120,6 +136,12 @@ class CRDTEditor {
             [1, this.initPeerElements(1)],
             [2, this.initPeerElements(2)]
         ]);
+        this.network_settings = {
+            auto_process: false,
+            process_delay: 1.0
+        };
+        this.auto_process_input = document.getElementById('auto-process');
+        this.delay_input = document.getElementById('delay');
         this.initializeUI();
     }
     initPeerElements(peer_id) {
@@ -171,6 +193,25 @@ class CRDTEditor {
             });
             els.editor.addEventListener('keydown', (e) => this.handleKeydown(peer_id, e));
             els.editor.addEventListener('click', () => this.updateCursorFromSelection(peer_id));
+        });
+        // Add network settings listeners
+        this.auto_process_input.addEventListener('change', () => {
+            this.network_settings.auto_process = this.auto_process_input.checked;
+            this.delay_input.disabled = !this.network_settings.auto_process;
+            // Clear any pending timeouts when auto-process is disabled
+            if (!this.network_settings.auto_process) {
+                [1, 2].forEach(peer_id => {
+                    const state = this.peers.get(peer_id);
+                    state.pending_timeouts.forEach(clearTimeout);
+                    state.pending_timeouts = [];
+                });
+            }
+        });
+        this.delay_input.addEventListener('change', () => {
+            const newDelay = parseFloat(this.delay_input.value);
+            if (!isNaN(newDelay) && newDelay >= 0) {
+                this.network_settings.process_delay = newDelay;
+            }
         });
     }
     handleInput(peer_id, event) {
@@ -304,6 +345,20 @@ class CRDTEditor {
                 const peer = this.peers.get(peer_id);
                 peer.incoming_messages.push(message);
                 this.updateIncomingMessages(peer_id);
+                // If auto-process is enabled, schedule processing
+                if (this.network_settings.auto_process) {
+                    const timeoutId = window.setTimeout(() => {
+                        // Find the first unprocessed message
+                        const messageIndex = peer.incoming_messages.findIndex(m => m === message);
+                        if (messageIndex >= 0) {
+                            this.deliverMessage(peer_id, messageIndex);
+                            this.dropMessage(peer_id, messageIndex);
+                        }
+                        // Remove the timeout ID from pending_timeouts
+                        peer.pending_timeouts = peer.pending_timeouts.filter(id => id !== timeoutId);
+                    }, this.network_settings.process_delay * 1000);
+                    peer.pending_timeouts.push(timeoutId);
+                }
             }
         });
     }

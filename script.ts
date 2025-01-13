@@ -12,6 +12,11 @@ type ParsedEdits =
     | { type: 'Ok'; edits: Edit[]; next_clock: number }
     | { type: 'Error'; message: string }
 
+interface NetworkSettings {
+    auto_process: boolean;
+    process_delay: number;
+}
+
 interface PeerState {
     peer_id: number;
     next_clock: number;
@@ -19,6 +24,7 @@ interface PeerState {
     root_id: string;
     incoming_messages: (Edit[] | Map<string, Tree>)[];
     cursor_node: string;  // ID of the node before cursor
+    pending_timeouts: number[];  // Store timeout IDs for cleanup
 }
 
 interface PeerElements {
@@ -42,6 +48,7 @@ const init_state = (peer_id: number): PeerState => ({
     next_clock: 1,
     incoming_messages: [],
     cursor_node: mk_id(0, 0),  // Start cursor at root
+    pending_timeouts: [],
 });
 
 const escapeSpecialChars = (str: string): string => {
@@ -55,7 +62,10 @@ const escapeSpecialChars = (str: string): string => {
 };
 
 const reprTree = (root_id: string, tree_by_id: Map<string, Tree>, indent: number): string => {
-    const root = tree_by_id.get(root_id) as Tree;
+    const root = tree_by_id.get(root_id);
+    if (!root) {
+        return `${' '.repeat(indent)}${root_id} <Missing>\n`;
+    }
     const indentation = '  '.repeat(indent);
     const nodeValue = root.value !== undefined ? escapeSpecialChars(root.value) : '<Tombstone>';
     const result = `${indentation}${root_id} ${nodeValue}\n`;
@@ -67,7 +77,8 @@ const reprTree = (root_id: string, tree_by_id: Map<string, Tree>, indent: number
 };
 
 const treeToString = (root_id: string, tree_by_id: Map<string, Tree>): string => {
-    const root = tree_by_id.get(root_id) as Tree;
+    const root = tree_by_id.get(root_id);
+    if (!root) return '';
     const value = root.value ?? '';
 
     return root.children.reduce(
@@ -77,7 +88,8 @@ const treeToString = (root_id: string, tree_by_id: Map<string, Tree>): string =>
 };
 
 const preorderTree = (root_id: string, tree_by_id: Map<string, Tree>): string[] => {
-    const root = tree_by_id.get(root_id) as Tree;
+    const root = tree_by_id.get(root_id);
+    if (!root) return [root_id];
     return root.children.reduce(
         (acc, child) => [...acc, ...preorderTree(child, tree_by_id)],
         [root_id]
@@ -113,7 +125,12 @@ const mergeEdits = (state: PeerState, edits: Edit[]): void => {
         if (edit.type === 'Insert') {
             if (state.tree_by_id.has(edit.new_id)) return;
 
-            const parent = state.tree_by_id.get(edit.parent) as Tree;
+            const parent = state.tree_by_id.get(edit.parent);
+            if (!parent) {
+                console.error(`Parent node ${edit.parent} not found for insertion of ${edit.new_id}`);
+                return;
+            }
+
             const parent_updated = {
                 ...parent,
                 children: [...parent.children, edit.new_id].sort(compare_ids)
@@ -127,7 +144,12 @@ const mergeEdits = (state: PeerState, edits: Edit[]): void => {
 
             state.next_clock = Math.max(state.next_clock, parseInt(edit.new_id.split('/')[1]) + 1);
         } else {
-            const to_delete = state.tree_by_id.get(edit.index) as Tree;
+            const to_delete = state.tree_by_id.get(edit.index);
+            if (!to_delete) {
+                console.error(`Node ${edit.index} not found for deletion`);
+                return;
+            }
+
             state.tree_by_id.set(edit.index, {
                 children: to_delete.children,
                 value: undefined,
@@ -167,6 +189,9 @@ const mergeTree = (state: PeerState, incoming_tree_by_id: Map<string, Tree>): vo
 class CRDTEditor {
     private peers: Map<number, PeerState>;
     private peer_elements: Map<number, PeerElements>;
+    private network_settings: NetworkSettings;
+    private auto_process_input: HTMLInputElement;
+    private delay_input: HTMLInputElement;
 
     constructor() {
         this.peers = new Map([
@@ -178,6 +203,14 @@ class CRDTEditor {
             [1, this.initPeerElements(1)],
             [2, this.initPeerElements(2)]
         ]);
+
+        this.network_settings = {
+            auto_process: false,
+            process_delay: 1.0
+        };
+
+        this.auto_process_input = document.getElementById('auto-process') as HTMLInputElement;
+        this.delay_input = document.getElementById('delay') as HTMLInputElement;
 
         this.initializeUI();
     }
@@ -236,6 +269,28 @@ class CRDTEditor {
             });
             els.editor.addEventListener('keydown', (e) => this.handleKeydown(peer_id, e));
             els.editor.addEventListener('click', () => this.updateCursorFromSelection(peer_id));
+        });
+
+        // Add network settings listeners
+        this.auto_process_input.addEventListener('change', () => {
+            this.network_settings.auto_process = this.auto_process_input.checked;
+            this.delay_input.disabled = !this.network_settings.auto_process;
+
+            // Clear any pending timeouts when auto-process is disabled
+            if (!this.network_settings.auto_process) {
+                [1, 2].forEach(peer_id => {
+                    const state = this.peers.get(peer_id) as PeerState;
+                    state.pending_timeouts.forEach(clearTimeout);
+                    state.pending_timeouts = [];
+                });
+            }
+        });
+
+        this.delay_input.addEventListener('change', () => {
+            const newDelay = parseFloat(this.delay_input.value);
+            if (!isNaN(newDelay) && newDelay >= 0) {
+                this.network_settings.process_delay = newDelay;
+            }
         });
     }
 
@@ -391,6 +446,22 @@ class CRDTEditor {
                 const peer = this.peers.get(peer_id) as PeerState;
                 peer.incoming_messages.push(message);
                 this.updateIncomingMessages(peer_id);
+
+                // If auto-process is enabled, schedule processing
+                if (this.network_settings.auto_process) {
+                    const timeoutId = window.setTimeout(() => {
+                        // Find the first unprocessed message
+                        const messageIndex = peer.incoming_messages.findIndex(m => m === message);
+                        if (messageIndex >= 0) {
+                            this.deliverMessage(peer_id, messageIndex);
+                            this.dropMessage(peer_id, messageIndex);
+                        }
+                        // Remove the timeout ID from pending_timeouts
+                        peer.pending_timeouts = peer.pending_timeouts.filter(id => id !== timeoutId);
+                    }, this.network_settings.process_delay * 1000);
+
+                    peer.pending_timeouts.push(timeoutId);
+                }
             }
         });
     }

@@ -155,6 +155,67 @@
                 padding: 1rem;
             }
         }
+
+        .description {
+            margin-bottom: 3rem;
+        }
+
+        .description h2 {
+            color: var(--primary-color);
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .description h3 {
+            font-size: 1.25rem;
+            margin: 1.5rem 0 0.75rem;
+        }
+
+        .description p {
+            color: #4b5563;
+            max-width: 65ch;
+        }
+
+        .description ul {
+            list-style-type: none;
+            padding: 0;
+            margin: 1rem 0;
+        }
+
+        .description li {
+            margin: 0.5rem 0;
+            color: #4b5563;
+        }
+
+        .description code {
+            background: var(--bg-gray);
+            padding: 0.2rem 0.4rem;
+            border-radius: 0.25rem;
+            font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, monospace;
+            font-size: 0.875rem;
+        }
+
+        .example-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+
+        .example {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            color: #4b5563;
+        }
+
+        .example code {
+            min-width: 120px;
+        }
+
+        .example span {
+            font-style: italic;
+        }
     </style>
 </head>
 
@@ -187,6 +248,37 @@
                 <div id="incoming-section2" class="incoming-section">
                     <div class="section-title">Incoming Messages</div>
                     <div id="incoming2"></div>
+                </div>
+            </div>
+        </div>
+        <div class="description">
+            <h2>Instructions</h2>
+            <p>This demo implements a tree-based CRDT for collaborative text editing. Each peer maintains their own copy
+                of the text and can make local edits that are eventually synchronized.</p>
+
+            <h3>How to Edit</h3>
+            <ul>
+                <li><code>+x</code> Inserts character 'x' after the current position</li>
+                <li><code>-</code> Deletes the prior character</li>
+            </ul>
+
+            <h3>Examples</h3>
+            <div class="example-list">
+                <div class="example">
+                    <code>+h+e+l+l+o</code>
+                    <span>→ Creates "hello"</span>
+                </div>
+                <div class="example">
+                    <code>he-llo</code>
+                    <span>→ Changes "hello" to "hllo"</span>
+                </div>
+                <div class="example">
+                    <code>he+x+yllo</code>
+                    <span>→ Changes "hello" to "hexyllo"</span>
+                </div>
+                <div class="example">
+                    <code>he--ll-o+l</code>
+                    <span>→ Changes "hello" to "lol"</span>
                 </div>
             </div>
         </div>

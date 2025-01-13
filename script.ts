@@ -105,7 +105,7 @@ const merge = (state: PeerState, edits: Edit[]): void => {
             });
         }
     });
-}
+};
 
 
 class CRDTEditor {

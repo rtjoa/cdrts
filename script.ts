@@ -41,10 +41,20 @@ const init_state = (peer_id: number): PeerState => ({
     incoming_messages: [],
 });
 
+const escapeSpecialChars = (str: string): string => {
+    return str
+        .replace(/\\/g, '\\\\')    // Escape backslashes first
+        .replace(/\n/g, '\\n')     // Escape newlines
+        .replace(/\r/g, '\\r')     // Escape carriage returns
+        .replace(/\t/g, '\\t')     // Escape tabs
+        .replace(/\f/g, '\\f')     // Escape form feeds
+        .replace(/\v/g, '\\v');    // Escape vertical tabs
+};
+
 const reprTree = (root_id: string, tree_by_id: Map<string, Tree>, indent: number): string => {
     const root = tree_by_id.get(root_id) as Tree;
     const indentation = '  '.repeat(indent);
-    const nodeValue = root.value ?? '<Tombstone>';
+    const nodeValue = root.value !== undefined ? escapeSpecialChars(root.value) : '<Tombstone>';
     const result = `${indentation}${root_id} ${nodeValue}\n`;
 
     return root.children.reduce(
@@ -73,7 +83,7 @@ const preorderTree = (root_id: string, tree_by_id: Map<string, Tree>): string[] 
 
 const reprEdit = (edit: Edit): string => {
     return edit.type === 'Insert'
-        ? `after ${edit.parent} ins ${edit.new_id} ${edit.value}`
+        ? `after ${edit.parent} ins ${edit.new_id} ${escapeSpecialChars(edit.value)}`
         : `del ${edit.index}`;
 };
 

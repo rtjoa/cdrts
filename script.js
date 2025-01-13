@@ -10,11 +10,19 @@ const init_state = (peer_id) => ({
     next_clock: 1,
     incoming_messages: [],
 });
+const escapeSpecialChars = (str) => {
+    return str
+        .replace(/\\/g, '\\\\') // Escape backslashes first
+        .replace(/\n/g, '\\n') // Escape newlines
+        .replace(/\r/g, '\\r') // Escape carriage returns
+        .replace(/\t/g, '\\t') // Escape tabs
+        .replace(/\f/g, '\\f') // Escape form feeds
+        .replace(/\v/g, '\\v'); // Escape vertical tabs
+};
 const reprTree = (root_id, tree_by_id, indent) => {
-    var _a;
     const root = tree_by_id.get(root_id);
     const indentation = '  '.repeat(indent);
-    const nodeValue = (_a = root.value) !== null && _a !== void 0 ? _a : '<Tombstone>';
+    const nodeValue = root.value !== undefined ? escapeSpecialChars(root.value) : '<Tombstone>';
     const result = `${indentation}${root_id} ${nodeValue}\n`;
     return root.children.reduce((acc, child) => acc + reprTree(child, tree_by_id, indent + 1), result);
 };
@@ -30,7 +38,7 @@ const preorderTree = (root_id, tree_by_id) => {
 };
 const reprEdit = (edit) => {
     return edit.type === 'Insert'
-        ? `after ${edit.parent} ins ${edit.new_id} ${edit.value}`
+        ? `after ${edit.parent} ins ${edit.new_id} ${escapeSpecialChars(edit.value)}`
         : `del ${edit.index}`;
 };
 const isNodeTombstone = (node_id, tree_by_id) => {

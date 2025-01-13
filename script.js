@@ -9,6 +9,7 @@ const init_state = (peer_id) => ({
     ]),
     next_clock: 1,
     incoming_messages: [],
+    cursor_node: mk_id(0, 0), // Start cursor at root
 });
 const escapeSpecialChars = (str) => {
     return str
@@ -124,29 +125,162 @@ class CRDTEditor {
     initPeerElements(peer_id) {
         return {
             input: document.getElementById(`input${peer_id}`),
+            editor: document.getElementById(`editor${peer_id}`),
             tree: document.getElementById(`tree${peer_id}`),
             incoming: document.getElementById(`incoming${peer_id}`),
             error: document.getElementById(`error${peer_id}`),
         };
     }
     initializeUI() {
-        var _a, _b, _c, _d, _e, _f;
-        // Set initial text for Peer 1 before adding event listeners
-        const peer1Input = document.getElementById('input1');
-        peer1Input.value = '+h+e+l+l+o';
-        // Set initial button states before adding event listeners
+        // Set initial text for Peer 1
+        const peer1State = this.peers.get(1);
+        const peer1Els = this.peer_elements.get(1);
+        // Add initial "hello" text for peer 1
+        const initialText = "hello";
+        initialText.split('').forEach(char => {
+            const edit = {
+                type: 'Insert',
+                parent: peer1State.cursor_node,
+                new_id: mk_id(1, peer1State.next_clock++),
+                value: char
+            };
+            mergeEdits(peer1State, [edit]);
+            peer1State.cursor_node = edit.new_id;
+        });
+        // Set initial button states and refresh displays
         this.refreshTree(1);
         this.refreshTree(2);
         this.updateButtonStates(1);
         this.updateButtonStates(2);
-        // Add event listeners after initial states are set
-        (_a = document.getElementById('send1')) === null || _a === void 0 ? void 0 : _a.addEventListener('click', () => this.commit(1));
-        (_b = document.getElementById('send-tree1')) === null || _b === void 0 ? void 0 : _b.addEventListener('click', () => this.sendTree(1));
-        (_c = document.getElementById('send2')) === null || _c === void 0 ? void 0 : _c.addEventListener('click', () => this.commit(2));
-        (_d = document.getElementById('send-tree2')) === null || _d === void 0 ? void 0 : _d.addEventListener('click', () => this.sendTree(2));
-        // Add input event listeners
-        (_e = document.getElementById('input1')) === null || _e === void 0 ? void 0 : _e.addEventListener('input', () => this.updateButtonStates(1));
-        (_f = document.getElementById('input2')) === null || _f === void 0 ? void 0 : _f.addEventListener('input', () => this.updateButtonStates(2));
+        this.updateEditorContent(1);
+        this.updateEditorContent(2);
+        // Add event listeners
+        [1, 2].forEach(peer_id => {
+            var _a, _b;
+            const els = this.peer_elements.get(peer_id);
+            (_a = document.getElementById(`send${peer_id}`)) === null || _a === void 0 ? void 0 : _a.addEventListener('click', () => this.commit(peer_id));
+            (_b = document.getElementById(`send-tree${peer_id}`)) === null || _b === void 0 ? void 0 : _b.addEventListener('click', () => this.sendTree(peer_id));
+            els.editor.addEventListener('input', (e) => {
+                if (e instanceof InputEvent) {
+                    this.handleInput(peer_id, e);
+                }
+            });
+            els.editor.addEventListener('keydown', (e) => this.handleKeydown(peer_id, e));
+            els.editor.addEventListener('click', () => this.updateCursorFromSelection(peer_id));
+        });
+    }
+    handleInput(peer_id, event) {
+        const state = this.peers.get(peer_id);
+        const els = this.peer_elements.get(peer_id);
+        // Handle text input
+        if (event.inputType === 'insertText' && event.data) {
+            const edit = {
+                type: 'Insert',
+                parent: state.cursor_node,
+                new_id: mk_id(state.peer_id, state.next_clock++),
+                value: event.data
+            };
+            mergeEdits(state, [edit]);
+            state.cursor_node = edit.new_id;
+            this.updateUI(state, els);
+            this.updateEditorContent(peer_id);
+            this.setCaretPosition(peer_id);
+        }
+        // Handle deletion
+        else if (event.inputType === 'deleteContentBackward') {
+            if (state.cursor_node === state.root_id)
+                return;
+            const edit = {
+                type: 'Delete',
+                index: state.cursor_node
+            };
+            // Update cursor to previous node
+            const nodes = preorderTree(state.root_id, state.tree_by_id);
+            const currentIndex = nodes.indexOf(state.cursor_node);
+            if (currentIndex > 0) {
+                let prevIndex = currentIndex - 1;
+                while (prevIndex > 0 && isNodeTombstone(nodes[prevIndex], state.tree_by_id)) {
+                    prevIndex--;
+                }
+                state.cursor_node = nodes[prevIndex];
+            }
+            mergeEdits(state, [edit]);
+            this.updateUI(state, els);
+            this.updateEditorContent(peer_id);
+            this.setCaretPosition(peer_id);
+        }
+    }
+    handleKeydown(peer_id, event) {
+        const state = this.peers.get(peer_id);
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+            event.preventDefault();
+            const nodes = preorderTree(state.root_id, state.tree_by_id);
+            const currentIndex = nodes.indexOf(state.cursor_node);
+            if (event.key === 'ArrowLeft' && currentIndex > 0) {
+                let prevIndex = currentIndex - 1;
+                while (prevIndex > 0 && isNodeTombstone(nodes[prevIndex], state.tree_by_id)) {
+                    prevIndex--;
+                }
+                state.cursor_node = nodes[prevIndex];
+            }
+            else if (event.key === 'ArrowRight' && currentIndex < nodes.length - 1) {
+                let nextIndex = currentIndex + 1;
+                while (nextIndex < nodes.length && isNodeTombstone(nodes[nextIndex], state.tree_by_id)) {
+                    nextIndex++;
+                }
+                if (nextIndex < nodes.length) {
+                    state.cursor_node = nodes[nextIndex];
+                }
+            }
+            this.setCaretPosition(peer_id);
+        }
+    }
+    updateCursorFromSelection(peer_id) {
+        const state = this.peers.get(peer_id);
+        const els = this.peer_elements.get(peer_id);
+        const selection = window.getSelection();
+        if (!selection || !selection.rangeCount)
+            return;
+        const range = selection.getRangeAt(0);
+        const offset = range.startOffset;
+        // Find the node at the cursor position
+        const nodes = preorderTree(state.root_id, state.tree_by_id);
+        let charCount = 0;
+        for (const node_id of nodes) {
+            if (!isNodeTombstone(node_id, state.tree_by_id)) {
+                if (charCount === offset) {
+                    state.cursor_node = node_id;
+                    break;
+                }
+                charCount++;
+            }
+        }
+    }
+    updateEditorContent(peer_id) {
+        const state = this.peers.get(peer_id);
+        const els = this.peer_elements.get(peer_id);
+        els.editor.textContent = treeToString(state.root_id, state.tree_by_id).slice(1);
+        els.input.value = els.editor.textContent; // Keep hidden textarea in sync
+    }
+    setCaretPosition(peer_id) {
+        const state = this.peers.get(peer_id);
+        const els = this.peer_elements.get(peer_id);
+        const nodes = preorderTree(state.root_id, state.tree_by_id);
+        let offset = 0;
+        for (const node_id of nodes) {
+            if (node_id === state.cursor_node)
+                break;
+            if (!isNodeTombstone(node_id, state.tree_by_id)) {
+                offset++;
+            }
+        }
+        const range = document.createRange();
+        const sel = window.getSelection();
+        range.setStart(els.editor.firstChild || els.editor, offset);
+        range.collapse(true);
+        sel === null || sel === void 0 ? void 0 : sel.removeAllRanges();
+        sel === null || sel === void 0 ? void 0 : sel.addRange(range);
+        els.editor.focus();
     }
     refreshTree(peer_id) {
         const state = this.peers.get(peer_id);
@@ -184,7 +318,7 @@ class CRDTEditor {
         });
     }
     updateUI(state, els) {
-        els.input.value = treeToString(state.root_id, state.tree_by_id).slice(1);
+        this.updateEditorContent(state.peer_id);
         els.tree.textContent = reprTree(state.root_id, state.tree_by_id, 0);
         this.updateButtonStates(state.peer_id);
     }

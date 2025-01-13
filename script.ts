@@ -18,10 +18,12 @@ interface PeerState {
     tree_by_id: Map<string, Tree>;
     root_id: string;
     incoming_messages: (Edit[] | Map<string, Tree>)[];
+    cursor_node: string;  // ID of the node before cursor
 }
 
 interface PeerElements {
     input: HTMLTextAreaElement;
+    editor: HTMLDivElement;
     tree: HTMLDivElement;
     incoming: HTMLDivElement;
     error: HTMLDivElement;
@@ -39,6 +41,7 @@ const init_state = (peer_id: number): PeerState => ({
     ]),
     next_clock: 1,
     incoming_messages: [],
+    cursor_node: mk_id(0, 0),  // Start cursor at root
 });
 
 const escapeSpecialChars = (str: string): string => {
@@ -182,6 +185,7 @@ class CRDTEditor {
     private initPeerElements(peer_id: number): PeerElements {
         return {
             input: document.getElementById(`input${peer_id}`) as HTMLTextAreaElement,
+            editor: document.getElementById(`editor${peer_id}`) as HTMLDivElement,
             tree: document.getElementById(`tree${peer_id}`) as HTMLDivElement,
             incoming: document.getElementById(`incoming${peer_id}`) as HTMLDivElement,
             error: document.getElementById(`error${peer_id}`) as HTMLDivElement,
@@ -189,25 +193,178 @@ class CRDTEditor {
     }
 
     private initializeUI(): void {
-        // Set initial text for Peer 1 before adding event listeners
-        const peer1Input = document.getElementById('input1') as HTMLTextAreaElement;
-        peer1Input.value = '+h+e+l+l+o';
+        // Set initial text for Peer 1
+        const peer1State = this.peers.get(1) as PeerState;
+        const peer1Els = this.peer_elements.get(1) as PeerElements;
 
-        // Set initial button states before adding event listeners
+        // Add initial "hello" text for peer 1
+        const initialText = "hello";
+        initialText.split('').forEach(char => {
+            const edit: Edit = {
+                type: 'Insert',
+                parent: peer1State.cursor_node,
+                new_id: mk_id(1, peer1State.next_clock++),
+                value: char
+            };
+            mergeEdits(peer1State, [edit]);
+            peer1State.cursor_node = edit.new_id;
+        });
+
+        // Set initial button states and refresh displays
         this.refreshTree(1);
         this.refreshTree(2);
         this.updateButtonStates(1);
         this.updateButtonStates(2);
+        this.updateEditorContent(1);
+        this.updateEditorContent(2);
 
-        // Add event listeners after initial states are set
-        document.getElementById('send1')?.addEventListener('click', () => this.commit(1));
-        document.getElementById('send-tree1')?.addEventListener('click', () => this.sendTree(1));
-        document.getElementById('send2')?.addEventListener('click', () => this.commit(2));
-        document.getElementById('send-tree2')?.addEventListener('click', () => this.sendTree(2));
+        // Add event listeners
+        [1, 2].forEach(peer_id => {
+            const els = this.peer_elements.get(peer_id) as PeerElements;
 
-        // Add input event listeners
-        document.getElementById('input1')?.addEventListener('input', () => this.updateButtonStates(1));
-        document.getElementById('input2')?.addEventListener('input', () => this.updateButtonStates(2));
+            document.getElementById(`send${peer_id}`)?.addEventListener('click', () => this.commit(peer_id));
+            document.getElementById(`send-tree${peer_id}`)?.addEventListener('click', () => this.sendTree(peer_id));
+
+            els.editor.addEventListener('input', (e: Event) => {
+                if (e instanceof InputEvent) {
+                    this.handleInput(peer_id, e);
+                }
+            });
+            els.editor.addEventListener('keydown', (e) => this.handleKeydown(peer_id, e));
+            els.editor.addEventListener('click', () => this.updateCursorFromSelection(peer_id));
+        });
+    }
+
+    private handleInput(peer_id: number, event: InputEvent): void {
+        const state = this.peers.get(peer_id) as PeerState;
+        const els = this.peer_elements.get(peer_id) as PeerElements;
+
+        // Handle text input
+        if (event.inputType === 'insertText' && event.data) {
+            const edit: Edit = {
+                type: 'Insert',
+                parent: state.cursor_node,
+                new_id: mk_id(state.peer_id, state.next_clock++),
+                value: event.data
+            };
+            mergeEdits(state, [edit]);
+            state.cursor_node = edit.new_id;
+            this.updateUI(state, els);
+            this.updateEditorContent(peer_id);
+            this.setCaretPosition(peer_id);
+        }
+        // Handle deletion
+        else if (event.inputType === 'deleteContentBackward') {
+            if (state.cursor_node === state.root_id) return;
+
+            const edit: Edit = {
+                type: 'Delete',
+                index: state.cursor_node
+            };
+
+            // Update cursor to previous node
+            const nodes = preorderTree(state.root_id, state.tree_by_id);
+            const currentIndex = nodes.indexOf(state.cursor_node);
+            if (currentIndex > 0) {
+                let prevIndex = currentIndex - 1;
+                while (prevIndex > 0 && isNodeTombstone(nodes[prevIndex], state.tree_by_id)) {
+                    prevIndex--;
+                }
+                state.cursor_node = nodes[prevIndex];
+            }
+
+            mergeEdits(state, [edit]);
+            this.updateUI(state, els);
+            this.updateEditorContent(peer_id);
+            this.setCaretPosition(peer_id);
+        }
+    }
+
+    private handleKeydown(peer_id: number, event: KeyboardEvent): void {
+        const state = this.peers.get(peer_id) as PeerState;
+
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+            event.preventDefault();
+
+            const nodes = preorderTree(state.root_id, state.tree_by_id);
+            const currentIndex = nodes.indexOf(state.cursor_node);
+
+            if (event.key === 'ArrowLeft' && currentIndex > 0) {
+                let prevIndex = currentIndex - 1;
+                while (prevIndex > 0 && isNodeTombstone(nodes[prevIndex], state.tree_by_id)) {
+                    prevIndex--;
+                }
+                state.cursor_node = nodes[prevIndex];
+            } else if (event.key === 'ArrowRight' && currentIndex < nodes.length - 1) {
+                let nextIndex = currentIndex + 1;
+                while (nextIndex < nodes.length && isNodeTombstone(nodes[nextIndex], state.tree_by_id)) {
+                    nextIndex++;
+                }
+                if (nextIndex < nodes.length) {
+                    state.cursor_node = nodes[nextIndex];
+                }
+            }
+
+            this.setCaretPosition(peer_id);
+        }
+    }
+
+    private updateCursorFromSelection(peer_id: number): void {
+        const state = this.peers.get(peer_id) as PeerState;
+        const els = this.peer_elements.get(peer_id) as PeerElements;
+
+        const selection = window.getSelection();
+        if (!selection || !selection.rangeCount) return;
+
+        const range = selection.getRangeAt(0);
+        const offset = range.startOffset;
+
+        // Find the node at the cursor position
+        const nodes = preorderTree(state.root_id, state.tree_by_id);
+        let charCount = 0;
+
+        for (const node_id of nodes) {
+            if (!isNodeTombstone(node_id, state.tree_by_id)) {
+                if (charCount === offset) {
+                    state.cursor_node = node_id;
+                    break;
+                }
+                charCount++;
+            }
+        }
+    }
+
+    private updateEditorContent(peer_id: number): void {
+        const state = this.peers.get(peer_id) as PeerState;
+        const els = this.peer_elements.get(peer_id) as PeerElements;
+
+        els.editor.textContent = treeToString(state.root_id, state.tree_by_id).slice(1);
+        els.input.value = els.editor.textContent;  // Keep hidden textarea in sync
+    }
+
+    private setCaretPosition(peer_id: number): void {
+        const state = this.peers.get(peer_id) as PeerState;
+        const els = this.peer_elements.get(peer_id) as PeerElements;
+
+        const nodes = preorderTree(state.root_id, state.tree_by_id);
+        let offset = 0;
+
+        for (const node_id of nodes) {
+            if (node_id === state.cursor_node) break;
+            if (!isNodeTombstone(node_id, state.tree_by_id)) {
+                offset++;
+            }
+        }
+
+        const range = document.createRange();
+        const sel = window.getSelection();
+
+        range.setStart(els.editor.firstChild || els.editor, offset);
+        range.collapse(true);
+
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+        els.editor.focus();
     }
 
     private refreshTree(peer_id: number): void {
@@ -252,7 +409,7 @@ class CRDTEditor {
     }
 
     private updateUI(state: PeerState, els: PeerElements): void {
-        els.input.value = treeToString(state.root_id, state.tree_by_id).slice(1);
+        this.updateEditorContent(state.peer_id);
         els.tree.textContent = reprTree(state.root_id, state.tree_by_id, 0);
         this.updateButtonStates(state.peer_id);
     }

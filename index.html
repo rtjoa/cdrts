@@ -54,22 +54,28 @@
             padding: 0 0.5rem;
         }
 
-        textarea {
+        .editor {
             width: calc(100% - 1rem);
-            height: 60px;
+            min-height: 60px;
             padding: 0.75rem;
             border: 1px solid var(--border-color);
             border-radius: 0.375rem;
             font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, monospace;
-            resize: none;
             font-size: 0.875rem;
             line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-word;
+            outline: none;
+            cursor: text;
         }
 
-        textarea:focus {
-            outline: none;
+        .editor:focus {
             border-color: var(--primary-color);
             box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        textarea {
+            display: none;
         }
 
         button {
@@ -271,7 +277,8 @@
             <div class="peer-container">
                 <div class="peer-title">Peer 1</div>
                 <div class="input-section">
-                    <textarea id="input1"></textarea>
+                    <div id="editor1" class="editor" contenteditable="true"></div>
+                    <textarea id="input1" style="display: none;"></textarea>
                     <button id="send1" disabled>Commit Edits</button>
                     <button id="send-tree1" disabled>Send Tree</button>
                     <div id="error1" class="error"></div>
@@ -286,7 +293,8 @@
             <div class="peer-container">
                 <div class="peer-title">Peer 2</div>
                 <div class="input-section">
-                    <textarea id="input2"></textarea>
+                    <div id="editor2" class="editor" contenteditable="true"></div>
+                    <textarea id="input2" style="display: none;"></textarea>
                     <button id="send2" disabled>Commit Edits</button>
                     <button id="send-tree2" disabled>Send Tree</button>
                     <div id="error2" class="error"></div>
@@ -310,10 +318,8 @@
             </p>
 
             <h3>How to Edit</h3>
-            <ul>
-                <li><code>+x</code> Inserts character 'x'</li>
-                <li><code>-</code> Deletes the prior character</li>
-            </ul>
+            <p>Simply type or delete text as you would in any text editor. The cursor position determines where new
+                characters are inserted.</p>
 
             <h3>Examples</h3>
             <div class="example-list">

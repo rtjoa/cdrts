@@ -332,6 +332,19 @@
             <p>
                 All trees have a hidden sentinel node <code>^</code> at the root.
             </p>
+
+            <h3>Messages</h3>
+            <p>
+                Committed edits are sent to the other peer and can be applied individually, preventing the need to send
+                the entire tree state.
+            </p>
+            <p>
+                If the network does not guarantee eventual delivery, peers can still be synchronized by sending a
+                snapshot of the entire tree state.
+            </p>
+            <p>
+                Merging both types of updates should be associative, commutative, and idempotent.
+            </p>
         </div>
     </div>
 </body>

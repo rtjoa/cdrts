@@ -343,7 +343,9 @@
             </p>
             <p>
                 Because insertions are of the form "insert after X," multiple children of the same node are displayed in
-                order of decreasing timestamp (we arbitrarily break ties by peer id).
+                order of decreasing timestamp.
+                To break ties, we use the peer id (we choose an arbitrary ordering on peers, but the fact that they are
+                tracked and ordered helps prevent interleaving concurrent edits).
             </p>
             <p>
                 All trees have a hidden sentinel node <code>^</code> at the root.

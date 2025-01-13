@@ -315,30 +315,6 @@
                     CRDT</a> and made in <a href="https://notes.ekzhang.com/events/nysrg">NYSRG</a>.
             </p>
 
-            <h3>How to Edit</h3>
-            <p>Simply type or delete text as you would in any text editor. The cursor position determines where new
-                characters are inserted.</p>
-
-            <h3>Examples</h3>
-            <div class="example-list">
-                <div class="example">
-                    <code>+h+e+l+l+o</code>
-                    <span>→ Creates "hello"</span>
-                </div>
-                <div class="example">
-                    <code>he-llo</code>
-                    <span>→ Changes "hello" to "hllo"</span>
-                </div>
-                <div class="example">
-                    <code>he+x+yllo</code>
-                    <span>→ Changes "hello" to "hexyllo"</span>
-                </div>
-                <div class="example">
-                    <code>he--ll-o+l</code>
-                    <span>→ Changes "hello" to "lol"</span>
-                </div>
-            </div>
-
             <h2>Implementation</h2>
             <h3>Tree Representation</h3>
             <p>Node IDs are formatted as <code>peer_id/clock</code>. The clock is a <a

@@ -231,48 +231,65 @@ class CRDTEditor {
     handleInput(peer_id, event) {
         const state = this.peers.get(peer_id);
         const els = this.peer_elements.get(peer_id);
-        // Handle text input
-        if (event.inputType === 'insertText' && event.data) {
-            const edit = {
-                type: 'Insert',
-                parent: state.cursor_node,
-                new_id: mk_id(state.peer_id, state.next_clock++),
-                value: event.data
-            };
-            mergeEdits(state, [edit]);
-            state.cursor_node = edit.new_id;
-            this.broadcastEdits(peer_id, [edit]);
-            this.updateUI(state, els);
-            this.updateEditorContent(peer_id);
-            this.setCaretPosition(peer_id);
+        // Handle text input (including paste)
+        if (event.inputType === 'insertText' || event.inputType === 'insertFromPaste') {
+            const text = event.data || '';
+            const edits = [];
+            // Insert each character sequentially
+            for (const char of text) {
+                const edit = {
+                    type: 'Insert',
+                    parent: state.cursor_node,
+                    new_id: mk_id(state.peer_id, state.next_clock++),
+                    value: char
+                };
+                edits.push(edit);
+                mergeEdits(state, [edit]);
+                state.cursor_node = edit.new_id;
+            }
+            if (edits.length > 0) {
+                this.broadcastEdits(peer_id, edits);
+                this.updateUI(state, els);
+                this.setCaretPosition(peer_id);
+            }
         }
         // Handle deletion
-        else if (event.inputType === 'deleteContentBackward') {
-            if (state.cursor_node === state.root_id)
-                return;
-            const edit = {
-                type: 'Delete',
-                index: state.cursor_node
-            };
-            // Update cursor to previous node
+        else if (event.inputType.startsWith('delete')) {
             const nodes = preorderTree(state.root_id, state.tree_by_id);
-            const currentIndex = nodes.indexOf(state.cursor_node);
-            if (currentIndex > 0) {
-                let prevIndex = currentIndex - 1;
-                while (prevIndex > 0 && isNodeTombstone(nodes[prevIndex], state.tree_by_id)) {
-                    prevIndex--;
+            const edits = [];
+            // Get visible (non-tombstone) nodes and their indices
+            const visibleNodes = nodes.filter(node => !isNodeTombstone(node, state.tree_by_id));
+            const cursorIndex = visibleNodes.indexOf(state.cursor_node);
+            // For deleteContentForward, we want to delete from current position
+            // For deleteContentBackward, we want to delete from previous position
+            const startIndex = event.inputType === 'deleteContentForward' ? cursorIndex : cursorIndex - 1;
+            if (startIndex >= 0 && startIndex < visibleNodes.length) {
+                const nodeToDelete = visibleNodes[startIndex];
+                const edit = {
+                    type: 'Delete',
+                    index: nodeToDelete
+                };
+                edits.push(edit);
+                mergeEdits(state, [edit]);
+                // Update cursor position
+                if (event.inputType === 'deleteContentBackward') {
+                    state.cursor_node = startIndex > 0 ? visibleNodes[startIndex - 1] : state.root_id;
                 }
-                state.cursor_node = nodes[prevIndex];
+                else {
+                    state.cursor_node = cursorIndex > 0 ? visibleNodes[cursorIndex - 1] : state.root_id;
+                }
             }
-            mergeEdits(state, [edit]);
-            this.broadcastEdits(peer_id, [edit]);
-            this.updateUI(state, els);
-            this.updateEditorContent(peer_id);
-            this.setCaretPosition(peer_id);
+            if (edits.length > 0) {
+                this.broadcastEdits(peer_id, edits);
+                this.updateUI(state, els);
+                this.setCaretPosition(peer_id);
+            }
         }
     }
     handleKeydown(peer_id, event) {
+        var _a;
         const state = this.peers.get(peer_id);
+        const els = this.peer_elements.get(peer_id);
         if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
             event.preventDefault();
             const nodes = preorderTree(state.root_id, state.tree_by_id);
@@ -293,6 +310,34 @@ class CRDTEditor {
                     state.cursor_node = nodes[nextIndex];
                 }
             }
+            this.setCaretPosition(peer_id);
+        }
+        // Handle range deletion with backspace or delete
+        else if ((event.key === 'Backspace' || event.key === 'Delete') && ((_a = window.getSelection()) === null || _a === void 0 ? void 0 : _a.toString())) {
+            event.preventDefault();
+            const selection = window.getSelection();
+            if (!selection || !selection.rangeCount)
+                return;
+            const range = selection.getRangeAt(0);
+            const startOffset = range.startOffset;
+            const endOffset = range.endOffset;
+            // Get visible nodes
+            const nodes = preorderTree(state.root_id, state.tree_by_id);
+            const visibleNodes = nodes.filter(node => !isNodeTombstone(node, state.tree_by_id));
+            // Calculate which nodes to delete based on selection
+            const nodesToDelete = visibleNodes.slice(startOffset, endOffset);
+            if (nodesToDelete.length === 0)
+                return;
+            const edits = nodesToDelete.map(node => ({
+                type: 'Delete',
+                index: node
+            }));
+            // Update cursor to the start of selection
+            state.cursor_node = startOffset > 0 ? visibleNodes[startOffset - 1] : state.root_id;
+            // Apply all deletes
+            mergeEdits(state, edits);
+            this.broadcastEdits(peer_id, edits);
+            this.updateUI(state, els);
             this.setCaretPosition(peer_id);
         }
     }

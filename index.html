@@ -198,12 +198,13 @@
             gap: 0.5rem;
             margin-bottom: 0.75rem;
             position: relative;
+            padding-right: 0.5rem;
         }
 
         .countdown {
             position: absolute;
             top: 50%;
-            right: 12rem;
+            right: 1rem;
             transform: translateY(-50%);
             width: 16px;
             height: 16px;
@@ -234,12 +235,16 @@
             background: var(--bg-gray);
             border-radius: 0.375rem;
             font-size: 0.875rem;
+            margin-right: 2rem;
+        }
+
+        .message-text:has(+ .countdown + .button-group:not(:has(button:disabled))) {
             margin-right: 16rem;
         }
 
         .button-group {
             position: absolute;
-            right: 0;
+            right: 0.5rem;
             top: 50%;
             transform: translateY(-50%);
             display: flex;
@@ -248,8 +253,8 @@
             min-width: 11rem;
         }
 
-        .button-group button {
-            flex: 1;
+        .button-group:has(button:disabled) {
+            display: none;
         }
 
         @media (max-width: 768px) {

@@ -387,6 +387,16 @@
             font-size: 0.875rem;
             min-width: 5rem;
         }
+
+        [contenteditable]:empty:before {
+            content: attr(data-placeholder);
+            color: #888;
+            font-style: italic;
+        }
+
+        [contenteditable]:focus {
+            outline: none;
+        }
     </style>
 </head>
 

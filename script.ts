@@ -224,13 +224,19 @@ class CRDTEditor {
     }
 
     private initPeerElements(peer_id: number): PeerElements {
-        return {
+        const elements = {
             input: document.getElementById(`input${peer_id}`) as HTMLTextAreaElement,
             editor: document.getElementById(`editor${peer_id}`) as HTMLDivElement,
             tree: document.getElementById(`tree${peer_id}`) as HTMLDivElement,
             incoming: document.getElementById(`incoming${peer_id}`) as HTMLDivElement,
             error: document.getElementById(`error${peer_id}`) as HTMLDivElement,
         };
+
+        // Add placeholder text
+        elements.editor.setAttribute('placeholder', 'Start typing...');
+        elements.editor.dataset.placeholder = 'Start typing...';  // For CSS styling
+
+        return elements;
     }
 
     private initializeUI(): void {

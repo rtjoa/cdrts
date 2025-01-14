@@ -149,13 +149,17 @@ class CRDTEditor {
         this.initializeUI();
     }
     initPeerElements(peer_id) {
-        return {
+        const elements = {
             input: document.getElementById(`input${peer_id}`),
             editor: document.getElementById(`editor${peer_id}`),
             tree: document.getElementById(`tree${peer_id}`),
             incoming: document.getElementById(`incoming${peer_id}`),
             error: document.getElementById(`error${peer_id}`),
         };
+        // Add placeholder text
+        elements.editor.setAttribute('placeholder', 'Start typing...');
+        elements.editor.dataset.placeholder = 'Start typing...'; // For CSS styling
+        return elements;
     }
     initializeUI() {
         // Add tree toggle buttons

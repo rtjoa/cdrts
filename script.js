@@ -218,8 +218,12 @@ class CRDTEditor {
                     const state = this.peers.get(peer_id);
                     state.pending_timeouts.forEach(clearTimeout);
                     state.pending_timeouts = [];
+                    // Update UI to show buttons for pending messages
+                    this.updateIncomingMessages(peer_id);
                 });
             }
+            // Update button states for both peers
+            [1, 2].forEach(peer_id => this.updateButtonStates(peer_id));
         });
         this.delay_input.addEventListener('change', () => {
             const newDelay = parseFloat(this.delay_input.value);
@@ -480,7 +484,6 @@ class CRDTEditor {
         }
         const countdownEl = document.createElement('div');
         countdownEl.className = 'countdown';
-        // Only show countdown when auto-process is on
         countdownEl.style.display = this.network_settings.auto_process ? 'block' : 'none';
         const buttonGroup = document.createElement('div');
         buttonGroup.className = 'button-group';
@@ -494,6 +497,8 @@ class CRDTEditor {
         dropButton.disabled = this.network_settings.auto_process;
         buttonGroup.append(deliverButton, dropButton);
         messageDiv.append(messageText, countdownEl, buttonGroup);
+        // Update message text margin based on auto-process state
+        messageText.style.marginRight = this.network_settings.auto_process ? '2rem' : '16rem';
         return messageDiv;
     }
     deliverMessage(peer_id, message_index) {

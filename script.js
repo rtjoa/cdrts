@@ -325,6 +325,7 @@ class CRDTEditor {
             || '';
     }
     handleInput(peer_id, event) {
+        var _a;
         const state = this.peers.get(peer_id);
         const els = this.peer_elements.get(peer_id);
         // For paste events, use the clipboard data if available
@@ -399,9 +400,26 @@ class CRDTEditor {
         });
         // Special case for Enter key (insertParagraph)
         if (event.inputType === 'insertParagraph') {
-            // Get current text and find insertion point at the end
-            const text = treeToString(state.root_id, state.tree_by_id);
-            const insertPos = text.length;
+            // Get current text and find insertion point from selection
+            const selection = window.getSelection();
+            if (!selection || !selection.rangeCount)
+                return;
+            const range = selection.getRangeAt(0);
+            if (!els.editor.contains(range.startContainer))
+                return;
+            // Calculate the cursor position by counting characters in text nodes
+            let insertPos = 0;
+            const walker = document.createTreeWalker(els.editor, NodeFilter.SHOW_TEXT);
+            let node;
+            let foundStart = false;
+            while (node = walker.nextNode()) {
+                if (node === range.startContainer) {
+                    insertPos += range.startOffset;
+                    foundStart = true;
+                    break;
+                }
+                insertPos += ((_a = node.textContent) === null || _a === void 0 ? void 0 : _a.length) || 0;
+            }
             // Get visible nodes for parent selection
             const nodes = preorderTree(state.root_id, state.tree_by_id);
             const visibleNodes = nodes.filter(node => !isNodeTombstone(node, state.tree_by_id))

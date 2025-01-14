@@ -503,9 +503,26 @@ class CRDTEditor {
 
         // Special case for Enter key (insertParagraph)
         if (event.inputType === 'insertParagraph') {
-            // Get current text and find insertion point at the end
-            const text = treeToString(state.root_id, state.tree_by_id);
-            const insertPos = text.length;
+            // Get current text and find insertion point from selection
+            const selection = window.getSelection();
+            if (!selection || !selection.rangeCount) return;
+
+            const range = selection.getRangeAt(0);
+            if (!els.editor.contains(range.startContainer)) return;
+
+            // Calculate the cursor position by counting characters in text nodes
+            let insertPos = 0;
+            const walker = document.createTreeWalker(els.editor, NodeFilter.SHOW_TEXT);
+            let node;
+            let foundStart = false;
+            while (node = walker.nextNode()) {
+                if (node === range.startContainer) {
+                    insertPos += range.startOffset;
+                    foundStart = true;
+                    break;
+                }
+                insertPos += node.textContent?.length || 0;
+            }
 
             // Get visible nodes for parent selection
             const nodes = preorderTree(state.root_id, state.tree_by_id);

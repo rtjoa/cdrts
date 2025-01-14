@@ -137,11 +137,14 @@ class CRDTEditor {
             [2, this.initPeerElements(2)]
         ]);
         this.network_settings = {
-            auto_process: false,
-            process_delay: 1.0
+            auto_process: true, // Enable by default
+            process_delay: 2.0
         };
         this.auto_process_input = document.getElementById('auto-process');
         this.delay_input = document.getElementById('delay');
+        // Initialize UI with auto-process enabled
+        this.auto_process_input.checked = true;
+        this.delay_input.disabled = false;
         this.initializeUI();
     }
     initPeerElements(peer_id) {
@@ -198,8 +201,19 @@ class CRDTEditor {
         this.auto_process_input.addEventListener('change', () => {
             this.network_settings.auto_process = this.auto_process_input.checked;
             this.delay_input.disabled = !this.network_settings.auto_process;
-            // Clear any pending timeouts when auto-process is disabled
-            if (!this.network_settings.auto_process) {
+            if (this.network_settings.auto_process) {
+                // Process all existing messages immediately in order
+                [1, 2].forEach(peer_id => {
+                    const peer = this.peers.get(peer_id);
+                    // Process all existing messages in order
+                    while (peer.incoming_messages.length > 0) {
+                        this.deliverMessage(peer_id, 0);
+                        this.dropMessage(peer_id, 0);
+                    }
+                });
+            }
+            else {
+                // Clear any pending timeouts when auto-process is disabled
                 [1, 2].forEach(peer_id => {
                     const state = this.peers.get(peer_id);
                     state.pending_timeouts.forEach(clearTimeout);
@@ -343,13 +357,19 @@ class CRDTEditor {
         [1, 2].forEach(peer_id => {
             if (peer_id !== sender_id) {
                 const peer = this.peers.get(peer_id);
-                peer.incoming_messages.push(message);
+                const startTime = Date.now();
+                const messageInfo = {
+                    message,
+                    startTime,
+                    countdownEl: document.createElement('div')
+                };
+                peer.incoming_messages.push(messageInfo);
                 this.updateIncomingMessages(peer_id);
                 // If auto-process is enabled, schedule processing
                 if (this.network_settings.auto_process) {
                     const timeoutId = window.setTimeout(() => {
                         // Find the first unprocessed message
-                        const messageIndex = peer.incoming_messages.findIndex(m => m === message);
+                        const messageIndex = peer.incoming_messages.findIndex(m => m.message === message);
                         if (messageIndex >= 0) {
                             this.deliverMessage(peer_id, messageIndex);
                             this.dropMessage(peer_id, messageIndex);
@@ -357,6 +377,21 @@ class CRDTEditor {
                         // Remove the timeout ID from pending_timeouts
                         peer.pending_timeouts = peer.pending_timeouts.filter(id => id !== timeoutId);
                     }, this.network_settings.process_delay * 1000);
+                    // Start countdown animation
+                    const updateCountdown = () => {
+                        const messageIndex = peer.incoming_messages.findIndex(m => m.message === message);
+                        if (messageIndex >= 0) {
+                            const messageInfo = peer.incoming_messages[messageIndex];
+                            const elapsed = (Date.now() - messageInfo.startTime) / 1000;
+                            const progress = Math.min(1, elapsed / this.network_settings.process_delay) * 100;
+                            messageInfo.countdownEl.style.background =
+                                `conic-gradient(var(--primary-color) ${progress}%, #e5e7eb ${progress}%)`;
+                            if (progress < 100) {
+                                requestAnimationFrame(updateCountdown);
+                            }
+                        }
+                    };
+                    requestAnimationFrame(updateCountdown);
                     peer.pending_timeouts.push(timeoutId);
                 }
             }
@@ -377,8 +412,12 @@ class CRDTEditor {
         }
         incomingSection === null || incomingSection === void 0 ? void 0 : incomingSection.classList.add('has-messages');
         els.incoming.innerHTML = '';
-        state.incoming_messages.forEach((message, index) => {
-            const messageEl = this.createMessageElement(message, peer_id, index);
+        state.incoming_messages.forEach((messageInfo, index) => {
+            const messageEl = this.createMessageElement(messageInfo.message, peer_id, index);
+            const countdownEl = messageEl.querySelector('.countdown');
+            messageInfo.countdownEl = countdownEl;
+            // Update countdown visibility based on auto-process state
+            countdownEl.style.display = this.network_settings.auto_process ? 'block' : 'none';
             els.incoming.appendChild(messageEl);
         });
     }
@@ -394,26 +433,33 @@ class CRDTEditor {
         else {
             messageText.textContent = message.map(edit => reprEdit(edit)).join('\n');
         }
+        const countdownEl = document.createElement('div');
+        countdownEl.className = 'countdown';
+        // Only show countdown when auto-process is on
+        countdownEl.style.display = this.network_settings.auto_process ? 'block' : 'none';
         const buttonGroup = document.createElement('div');
         buttonGroup.className = 'button-group';
         const deliverButton = document.createElement('button');
         deliverButton.textContent = 'Process';
         deliverButton.onclick = () => this.deliverMessage(peer_id, index);
+        deliverButton.disabled = this.network_settings.auto_process;
         const dropButton = document.createElement('button');
         dropButton.textContent = 'Drop';
         dropButton.onclick = () => this.dropMessage(peer_id, index);
+        dropButton.disabled = this.network_settings.auto_process;
         buttonGroup.append(deliverButton, dropButton);
-        messageDiv.append(messageText, buttonGroup);
+        messageDiv.append(messageText, countdownEl, buttonGroup);
         return messageDiv;
     }
     deliverMessage(peer_id, message_index) {
         const state = this.peers.get(peer_id);
         const els = this.peer_elements.get(peer_id);
-        if (state.incoming_messages[message_index] instanceof Map) {
-            mergeTree(state, state.incoming_messages[message_index]);
+        const messageInfo = state.incoming_messages[message_index];
+        if (messageInfo.message instanceof Map) {
+            mergeTree(state, messageInfo.message);
         }
         else {
-            mergeEdits(state, state.incoming_messages[message_index]);
+            mergeEdits(state, messageInfo.message);
         }
         this.updateUI(state, els);
     }
@@ -542,10 +588,11 @@ class CRDTEditor {
     updateButtonStates(peer_id) {
         const state = this.peers.get(peer_id);
         const sendTreeButton = document.getElementById(`send-tree${peer_id}`);
-        // Disable send tree button if there are no changes or only root node
-        sendTreeButton.disabled = !this.hasTreeChanges(state);
+        // Disable send tree button if there are no changes or only root node, or if auto-process is on
+        sendTreeButton.disabled = !this.hasTreeChanges(state) || this.network_settings.auto_process;
         // Update button tooltips for better UX
-        sendTreeButton.title = sendTreeButton.disabled ? 'No tree changes to send' : 'Send tree state';
+        sendTreeButton.title = this.network_settings.auto_process ? 'Disabled during auto-process' :
+            (sendTreeButton.disabled ? 'No tree changes to send' : 'Send tree state');
     }
 }
 // Initialize the application when the window loads

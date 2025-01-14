@@ -331,8 +331,8 @@ class CRDTEditor {
             if (!selection || !selection.rangeCount)
                 return;
             const range = selection.getRangeAt(0);
-            const startOffset = range.startOffset;
-            const endOffset = range.endOffset;
+            const startOffset = range.startOffset + 1;
+            const endOffset = range.endOffset + 1;
             // Get visible nodes
             const nodes = preorderTree(state.root_id, state.tree_by_id);
             const visibleNodes = nodes.filter(node => !isNodeTombstone(node, state.tree_by_id));

@@ -192,8 +192,10 @@ class CRDTEditor {
     private network_settings: NetworkSettings;
     private auto_process_input: HTMLInputElement;
     private delay_input: HTMLInputElement;
-    private treeVisible: boolean = true;  // Shared visibility state
-    private treeToggles: Map<number, HTMLAnchorElement> = new Map();  // Store toggle links
+    private treeVisible: boolean = true;
+    private incomingVisible: boolean = true;
+    private treeToggles: Map<number, HTMLAnchorElement> = new Map();
+    private incomingToggles: Map<number, HTMLAnchorElement> = new Map();
 
     constructor() {
         this.peers = new Map([
@@ -250,6 +252,25 @@ class CRDTEditor {
                 };
                 treeSection.appendChild(toggleLink);
                 this.treeToggles.set(peer_id, toggleLink);
+            }
+
+            // Add incoming messages toggle
+            const incomingEl = document.querySelector(`#incoming${peer_id}`);
+            if (!incomingEl) return;
+
+            const incomingSection = incomingEl.previousElementSibling;
+            if (incomingSection && incomingSection.classList.contains('section-title')) {
+                const toggleLink = document.createElement('a');
+                toggleLink.href = '#';
+                toggleLink.textContent = '(Hide)';
+                toggleLink.style.marginLeft = '0.5rem';
+                toggleLink.style.fontSize = '0.9em';
+                toggleLink.onclick = (e) => {
+                    e.preventDefault();
+                    this.toggleIncomingVisibility(!this.incomingVisible);
+                };
+                incomingSection.appendChild(toggleLink);
+                this.incomingToggles.set(peer_id, toggleLink);
             }
         });
 
@@ -727,22 +748,26 @@ class CRDTEditor {
         const els = this.peer_elements.get(peer_id) as PeerElements;
         const incomingSection = document.getElementById(`incoming-section${peer_id}`);
 
-        if (state.incoming_messages.length === 0) {
-            incomingSection?.classList.remove('has-messages');
-            return;
-        }
-
-        incomingSection?.classList.add('has-messages');
+        // Clear existing messages
         els.incoming.innerHTML = '';
 
-        state.incoming_messages.forEach((messageInfo, index) => {
-            const messageEl = this.createMessageElement(messageInfo.message, peer_id, index);
-            const countdownEl = messageEl.querySelector('.countdown') as HTMLDivElement;
-            messageInfo.countdownEl = countdownEl;
-            // Update countdown visibility based on auto-process state
-            countdownEl.style.display = this.network_settings.auto_process ? 'block' : 'none';
-            els.incoming.appendChild(messageEl);
-        });
+        // Add messages if there are any
+        if (state.incoming_messages.length > 0) {
+            els.incoming.classList.add('has-messages');
+            state.incoming_messages.forEach((messageInfo, index) => {
+                const messageEl = this.createMessageElement(messageInfo.message, peer_id, index);
+                const countdownEl = messageEl.querySelector('.countdown') as HTMLDivElement;
+                messageInfo.countdownEl = countdownEl;
+                // Update countdown visibility based on auto-process state
+                countdownEl.style.display = this.network_settings.auto_process ? 'block' : 'none';
+                els.incoming.appendChild(messageEl);
+            });
+        } else {
+            els.incoming.classList.remove('has-messages');
+        }
+
+        // Apply current visibility state
+        els.incoming.style.display = this.incomingVisible ? '' : 'none';
     }
 
     private createMessageElement(message: Edit[] | Map<string, Tree>, peer_id: number, index: number): HTMLDivElement {
@@ -981,6 +1006,23 @@ class CRDTEditor {
                     toggle.textContent = '(Hide)';
                 } else {
                     els.tree.style.display = 'none';
+                    toggle.textContent = '(Show)';
+                }
+            }
+        });
+    }
+
+    private toggleIncomingVisibility(visible: boolean): void {
+        this.incomingVisible = visible;
+        [1, 2].forEach(peer_id => {
+            const els = this.peer_elements.get(peer_id) as PeerElements;
+            const toggle = this.incomingToggles.get(peer_id);
+            if (toggle) {
+                if (visible) {
+                    els.incoming.style.display = '';
+                    toggle.textContent = '(Hide)';
+                } else {
+                    els.incoming.style.display = 'none';
                     toggle.textContent = '(Show)';
                 }
             }

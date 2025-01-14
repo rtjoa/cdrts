@@ -139,7 +139,7 @@ class CRDTEditor {
         ]);
         this.network_settings = {
             auto_process: true, // Enable by default
-            process_delay: 2.0
+            process_delay: 5.0
         };
         this.auto_process_input = document.getElementById('auto-process');
         this.delay_input = document.getElementById('delay');

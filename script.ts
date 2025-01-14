@@ -337,6 +337,33 @@ class CRDTEditor {
             const text = event.data || '';
             const edits: Edit[] = [];
 
+            // If there's a selection, delete it first
+            const selection = window.getSelection();
+            if (selection && selection.toString()) {
+                const range = selection.getRangeAt(0);
+                const startOffset = range.startOffset + 1;
+                const endOffset = range.endOffset + 1;
+
+                const nodes = preorderTree(state.root_id, state.tree_by_id);
+                const visibleNodes = nodes.filter(node => !isNodeTombstone(node, state.tree_by_id));
+                const nodesToDelete = visibleNodes.slice(startOffset, endOffset);
+
+                // Add deletion edits
+                nodesToDelete.forEach(node => {
+                    const deleteEdit: Edit = {
+                        type: 'Delete' as const,
+                        index: node
+                    };
+                    edits.push(deleteEdit);
+                });
+
+                // Apply the deletion edits
+                mergeEdits(state, edits);
+
+                // Update cursor to start of selection for the insertion
+                state.cursor_node = startOffset > 0 ? visibleNodes[startOffset - 1] : state.root_id;
+            }
+
             // Insert each character sequentially
             for (const char of text) {
                 const edit: Edit = {
@@ -419,6 +446,50 @@ class CRDTEditor {
                 }
             }
 
+            this.setCaretPosition(peer_id);
+        }
+        // Handle typing over selected text
+        else if (event.key.length === 1 && window.getSelection()?.toString()) {  // Single character key press with selection
+            event.preventDefault();
+            const selection = window.getSelection();
+            if (!selection || !selection.rangeCount) return;
+
+            const range = selection.getRangeAt(0);
+            const startOffset = range.startOffset + 1;
+            const endOffset = range.endOffset + 1;
+
+            // Get visible nodes
+            const nodes = preorderTree(state.root_id, state.tree_by_id);
+            const visibleNodes = nodes.filter(node => !isNodeTombstone(node, state.tree_by_id));
+
+            // Calculate which nodes to delete based on selection
+            const nodesToDelete = visibleNodes.slice(startOffset, endOffset);
+            if (nodesToDelete.length === 0) return;
+
+            const edits: Edit[] = nodesToDelete.map(node => ({
+                type: 'Delete' as const,
+                index: node
+            }));
+
+            // Update cursor to the start of selection
+            state.cursor_node = startOffset > 0 ? visibleNodes[startOffset - 1] : state.root_id;
+
+            // Apply all deletes
+            mergeEdits(state, edits);
+
+            // Insert the typed character
+            const insertEdit: Edit = {
+                type: 'Insert',
+                parent: state.cursor_node,
+                new_id: mk_id(state.peer_id, state.next_clock++),
+                value: event.key
+            };
+            edits.push(insertEdit);
+            mergeEdits(state, [insertEdit]);
+            state.cursor_node = insertEdit.new_id;
+
+            this.broadcastEdits(peer_id, edits);
+            this.updateUI(state, els);
             this.setCaretPosition(peer_id);
         }
         // Handle range deletion with backspace or delete

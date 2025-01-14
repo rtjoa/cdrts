@@ -247,6 +247,28 @@ class CRDTEditor {
         if (event.inputType === 'insertText' || event.inputType === 'insertFromPaste') {
             const text = event.data || '';
             const edits = [];
+            // If there's a selection, delete it first
+            const selection = window.getSelection();
+            if (selection && selection.toString()) {
+                const range = selection.getRangeAt(0);
+                const startOffset = range.startOffset + 1;
+                const endOffset = range.endOffset + 1;
+                const nodes = preorderTree(state.root_id, state.tree_by_id);
+                const visibleNodes = nodes.filter(node => !isNodeTombstone(node, state.tree_by_id));
+                const nodesToDelete = visibleNodes.slice(startOffset, endOffset);
+                // Add deletion edits
+                nodesToDelete.forEach(node => {
+                    const deleteEdit = {
+                        type: 'Delete',
+                        index: node
+                    };
+                    edits.push(deleteEdit);
+                });
+                // Apply the deletion edits
+                mergeEdits(state, edits);
+                // Update cursor to start of selection for the insertion
+                state.cursor_node = startOffset > 0 ? visibleNodes[startOffset - 1] : state.root_id;
+            }
             // Insert each character sequentially
             for (const char of text) {
                 const edit = {
@@ -299,7 +321,7 @@ class CRDTEditor {
         }
     }
     handleKeydown(peer_id, event) {
-        var _a;
+        var _a, _b;
         const state = this.peers.get(peer_id);
         const els = this.peer_elements.get(peer_id);
         if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
@@ -324,8 +346,46 @@ class CRDTEditor {
             }
             this.setCaretPosition(peer_id);
         }
+        // Handle typing over selected text
+        else if (event.key.length === 1 && ((_a = window.getSelection()) === null || _a === void 0 ? void 0 : _a.toString())) { // Single character key press with selection
+            event.preventDefault();
+            const selection = window.getSelection();
+            if (!selection || !selection.rangeCount)
+                return;
+            const range = selection.getRangeAt(0);
+            const startOffset = range.startOffset + 1;
+            const endOffset = range.endOffset + 1;
+            // Get visible nodes
+            const nodes = preorderTree(state.root_id, state.tree_by_id);
+            const visibleNodes = nodes.filter(node => !isNodeTombstone(node, state.tree_by_id));
+            // Calculate which nodes to delete based on selection
+            const nodesToDelete = visibleNodes.slice(startOffset, endOffset);
+            if (nodesToDelete.length === 0)
+                return;
+            const edits = nodesToDelete.map(node => ({
+                type: 'Delete',
+                index: node
+            }));
+            // Update cursor to the start of selection
+            state.cursor_node = startOffset > 0 ? visibleNodes[startOffset - 1] : state.root_id;
+            // Apply all deletes
+            mergeEdits(state, edits);
+            // Insert the typed character
+            const insertEdit = {
+                type: 'Insert',
+                parent: state.cursor_node,
+                new_id: mk_id(state.peer_id, state.next_clock++),
+                value: event.key
+            };
+            edits.push(insertEdit);
+            mergeEdits(state, [insertEdit]);
+            state.cursor_node = insertEdit.new_id;
+            this.broadcastEdits(peer_id, edits);
+            this.updateUI(state, els);
+            this.setCaretPosition(peer_id);
+        }
         // Handle range deletion with backspace or delete
-        else if ((event.key === 'Backspace' || event.key === 'Delete') && ((_a = window.getSelection()) === null || _a === void 0 ? void 0 : _a.toString())) {
+        else if ((event.key === 'Backspace' || event.key === 'Delete') && ((_b = window.getSelection()) === null || _b === void 0 ? void 0 : _b.toString())) {
             event.preventDefault();
             const selection = window.getSelection();
             if (!selection || !selection.rangeCount)

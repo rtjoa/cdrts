@@ -273,17 +273,76 @@ class CRDTEditor {
         console.log('findTextDiff result:', result);
         return result;
     }
-    handleInput(peer_id, event) {
-        const state = this.peers.get(peer_id);
-        const els = this.peer_elements.get(peer_id);
-        // Handle all input types
-        const newText = els.editor.innerHTML
+    convertHTMLToText(html) {
+        return html
             .replace(/<div><br><\/div>/g, '\n') // <div><br></div> -> single newline
             .replace(/<div>([^<]*)<\/div>/g, '\n$1') // <div>text</div> -> \ntext
             .replace(/<div>/g, '\n') // Any remaining divs -> newline
             .replace(/<\/div>/g, '') // Remove div closings
             .replace(/<br>/g, '\n') // <br> -> newline
             || '';
+    }
+    handleInput(peer_id, event) {
+        const state = this.peers.get(peer_id);
+        const els = this.peer_elements.get(peer_id);
+        // For paste events, use the clipboard data if available
+        if (event.inputType === 'insertFromPaste') {
+            // Let the browser handle the paste first
+            setTimeout(() => {
+                // Get the text content with correct newlines
+                const newText = this.convertHTMLToText(els.editor.innerHTML);
+                const oldText = treeToString(state.root_id, state.tree_by_id);
+                console.log('paste:', {
+                    oldText: JSON.stringify(oldText),
+                    newText: JSON.stringify(newText),
+                    innerHTML: els.editor.innerHTML
+                });
+                const diff = this.findTextDiff(oldText, newText);
+                const edits = [];
+                // Handle deletions
+                if (diff.deleteCount > 0) {
+                    const nodes = preorderTree(state.root_id, state.tree_by_id);
+                    const visibleNodes = nodes.filter(node => !isNodeTombstone(node, state.tree_by_id))
+                        .slice(1); // Remove sentinel from visible nodes
+                    const nodesToDelete = visibleNodes.slice(diff.startOffset, diff.startOffset + diff.deleteCount);
+                    nodesToDelete.forEach(node => {
+                        edits.push({
+                            type: 'Delete',
+                            index: node
+                        });
+                    });
+                    mergeEdits(state, edits);
+                }
+                // Handle insertions
+                if (diff.insertText) {
+                    const nodes = preorderTree(state.root_id, state.tree_by_id);
+                    const visibleNodes = nodes.filter(node => !isNodeTombstone(node, state.tree_by_id))
+                        .slice(1); // Remove sentinel from visible nodes
+                    // Find parent node for insertion
+                    const parent = diff.startOffset === 0 ? state.root_id : visibleNodes[diff.startOffset - 1];
+                    // Insert each character
+                    let lastInsertedId = parent;
+                    diff.insertText.split('').forEach(char => {
+                        const insertEdit = {
+                            type: 'Insert',
+                            parent: lastInsertedId,
+                            new_id: mk_id(state.peer_id, state.next_clock++),
+                            value: char
+                        };
+                        edits.push(insertEdit);
+                        mergeEdits(state, [insertEdit]);
+                        lastInsertedId = insertEdit.new_id;
+                    });
+                }
+                if (edits.length > 0) {
+                    this.broadcastEdits(peer_id, edits);
+                    this.refreshTree(peer_id);
+                }
+            }, 0);
+            return;
+        }
+        // Handle all other input types
+        const newText = this.convertHTMLToText(els.editor.innerHTML);
         const oldText = treeToString(state.root_id, state.tree_by_id);
         console.log('handleInput:', {
             type: event.inputType,

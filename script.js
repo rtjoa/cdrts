@@ -244,8 +244,8 @@ class CRDTEditor {
         const state = this.peers.get(peer_id);
         const els = this.peer_elements.get(peer_id);
         // Handle text input (including paste)
-        if (event.inputType === 'insertText' || event.inputType === 'insertFromPaste') {
-            const text = event.data || '';
+        if (event.inputType === 'insertText' || event.inputType === 'insertFromPaste' || event.inputType === 'insertLineBreak') {
+            const text = event.inputType === 'insertLineBreak' ? '\n' : (event.data || '');
             const edits = [];
             // If there's a selection, delete it first
             const selection = window.getSelection();
@@ -346,8 +346,43 @@ class CRDTEditor {
             }
             this.setCaretPosition(peer_id);
         }
+        // Handle Enter key for newlines
+        else if (event.key === 'Enter') {
+            // Let the browser handle the visual update, but capture the event
+            const edits = [];
+            // Handle selection case first
+            const selection = window.getSelection();
+            if (selection && selection.toString()) {
+                const range = selection.getRangeAt(0);
+                const startOffset = range.startOffset + 1;
+                const endOffset = range.endOffset + 1;
+                const nodes = preorderTree(state.root_id, state.tree_by_id);
+                const visibleNodes = nodes.filter(node => !isNodeTombstone(node, state.tree_by_id));
+                const nodesToDelete = visibleNodes.slice(startOffset, endOffset);
+                nodesToDelete.forEach(node => {
+                    edits.push({
+                        type: 'Delete',
+                        index: node
+                    });
+                });
+                mergeEdits(state, edits);
+                state.cursor_node = startOffset > 0 ? visibleNodes[startOffset - 1] : state.root_id;
+            }
+            // Insert the newline
+            const insertEdit = {
+                type: 'Insert',
+                parent: state.cursor_node,
+                new_id: mk_id(state.peer_id, state.next_clock++),
+                value: '\n'
+            };
+            edits.push(insertEdit);
+            mergeEdits(state, [insertEdit]);
+            state.cursor_node = insertEdit.new_id;
+            // Broadcast the edits but don't update UI since browser will handle that
+            this.broadcastEdits(peer_id, edits);
+        }
         // Handle typing over selected text
-        else if (event.key.length === 1 && ((_a = window.getSelection()) === null || _a === void 0 ? void 0 : _a.toString())) { // Single character key press with selection
+        else if (event.key.length === 1 && ((_a = window.getSelection()) === null || _a === void 0 ? void 0 : _a.toString())) {
             event.preventDefault();
             const selection = window.getSelection();
             if (!selection || !selection.rangeCount)

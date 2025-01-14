@@ -260,11 +260,10 @@ class CRDTEditor {
             // Get visible (non-tombstone) nodes and their indices
             const visibleNodes = nodes.filter(node => !isNodeTombstone(node, state.tree_by_id));
             const cursorIndex = visibleNodes.indexOf(state.cursor_node);
-            // For deleteContentForward, we want to delete from current position
-            // For deleteContentBackward, we want to delete from previous position
-            const startIndex = event.inputType === 'deleteContentForward' ? cursorIndex : cursorIndex - 1;
-            if (startIndex >= 0 && startIndex < visibleNodes.length) {
-                const nodeToDelete = visibleNodes[startIndex];
+            // For deleteContentForward (Delete key), delete the node at cursor
+            // For deleteContentBackward (Backspace), delete the cursor node itself
+            const nodeToDelete = state.cursor_node;
+            if (nodeToDelete !== state.root_id) {
                 const edit = {
                     type: 'Delete',
                     index: nodeToDelete
@@ -272,11 +271,12 @@ class CRDTEditor {
                 edits.push(edit);
                 mergeEdits(state, [edit]);
                 // Update cursor position
-                if (event.inputType === 'deleteContentBackward') {
-                    state.cursor_node = startIndex > 0 ? visibleNodes[startIndex - 1] : state.root_id;
+                const currentIndex = visibleNodes.indexOf(nodeToDelete);
+                if (currentIndex > 0) {
+                    state.cursor_node = visibleNodes[currentIndex - 1];
                 }
                 else {
-                    state.cursor_node = cursorIndex > 0 ? visibleNodes[cursorIndex - 1] : state.root_id;
+                    state.cursor_node = state.root_id;
                 }
             }
             if (edits.length > 0) {

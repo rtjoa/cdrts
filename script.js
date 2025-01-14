@@ -26,7 +26,7 @@ const reprTree = (root_id, tree_by_id, indent) => {
     if (!root) {
         return `${' '.repeat(indent)}${root_id} <Missing>\n`;
     }
-    const indentation = '  '.repeat(indent);
+    const indentation = ' '.repeat(indent);
     const nodeValue = root.value !== undefined ? escapeSpecialChars(root.value) : '<Tombstone>';
     const result = `${indentation}${root_id} ${nodeValue}\n`;
     return root.children.reduce((acc, child) => acc + reprTree(child, tree_by_id, indent + 1), result);

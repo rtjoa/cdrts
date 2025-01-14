@@ -72,7 +72,7 @@ const reprTree = (root_id: string, tree_by_id: Map<string, Tree>, indent: number
     if (!root) {
         return `${' '.repeat(indent)}${root_id} <Missing>\n`;
     }
-    const indentation = '  '.repeat(indent);
+    const indentation = ' '.repeat(indent);
     const nodeValue = root.value !== undefined ? escapeSpecialChars(root.value) : '<Tombstone>';
     const result = `${indentation}${root_id} ${nodeValue}\n`;
 

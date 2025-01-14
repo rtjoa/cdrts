@@ -29,7 +29,6 @@ interface PeerState {
     tree_by_id: Map<string, Tree>;
     root_id: string;
     incoming_messages: MessageInfo[];
-    cursor_node: string;  // ID of the node before cursor
     pending_timeouts: number[];  // Store timeout IDs for cleanup
 }
 
@@ -53,7 +52,6 @@ const init_state = (peer_id: number): PeerState => ({
     ]),
     next_clock: 1,
     incoming_messages: [],
-    cursor_node: mk_id(0, 0),  // Start cursor at root
     pending_timeouts: [],
 });
 
@@ -83,14 +81,10 @@ const reprTree = (root_id: string, tree_by_id: Map<string, Tree>, indent: number
 };
 
 const treeToString = (root_id: string, tree_by_id: Map<string, Tree>): string => {
-    const root = tree_by_id.get(root_id);
-    if (!root) return '';
-    const value = root.value ?? '';
-
-    return root.children.reduce(
-        (acc, child) => acc + treeToString(child, tree_by_id),
-        value
-    );
+    const nodes = preorderTree(root_id, tree_by_id);
+    const visibleNodes = nodes.filter(node => !isNodeTombstone(node, tree_by_id))
+        .slice(1);  // Remove sentinel node
+    return visibleNodes.map(node => tree_by_id.get(node)?.value || '').join('');
 };
 
 const preorderTree = (root_id: string, tree_by_id: Map<string, Tree>): string[] => {
@@ -243,16 +237,17 @@ class CRDTEditor {
         // Add initial text for peer 1
         const initialText = "";
         const initialEdits: Edit[] = [];
+        let lastInsertedId = peer1State.root_id;
         initialText.split('').forEach(char => {
             const edit: Edit = {
                 type: 'Insert',
-                parent: peer1State.cursor_node,
+                parent: lastInsertedId,
                 new_id: mk_id(1, peer1State.next_clock++),
                 value: char
             };
             initialEdits.push(edit);
             mergeEdits(peer1State, [edit]);
-            peer1State.cursor_node = edit.new_id;
+            lastInsertedId = edit.new_id;
         });
         if (initialEdits.length > 0) {
             this.broadcastEdits(1, initialEdits);
@@ -278,7 +273,6 @@ class CRDTEditor {
                 }
             });
             els.editor.addEventListener('keydown', (e) => this.handleKeydown(peer_id, e));
-            els.editor.addEventListener('click', () => this.updateCursorFromSelection(peer_id));
         });
 
         // Add network settings listeners
@@ -328,95 +322,108 @@ class CRDTEditor {
         });
     }
 
+    private findTextDiff(oldText: string, newText: string): { deleteCount: number; insertText: string; startOffset: number } {
+        console.log('findTextDiff:', { oldText, newText });
+
+        // Find the first differing character from the start
+        let startOffset = 0;
+        while (startOffset < oldText.length &&
+            startOffset < newText.length &&
+            oldText[startOffset] === newText[startOffset]) {
+            startOffset++;
+        }
+
+        // Find the first differing character from the end
+        let oldEndOffset = oldText.length;
+        let newEndOffset = newText.length;
+        while (oldEndOffset > startOffset &&
+            newEndOffset > startOffset &&
+            oldText[oldEndOffset - 1] === newText[newEndOffset - 1]) {
+            oldEndOffset--;
+            newEndOffset--;
+        }
+
+        // Special case: if we're just appending text, don't report any deletions
+        if (startOffset === oldText.length) {
+            const result = {
+                startOffset,
+                deleteCount: 0,
+                insertText: newText.slice(startOffset)
+            };
+            console.log('findTextDiff result (append):', result);
+            return result;
+        }
+
+        const result = {
+            startOffset,
+            deleteCount: oldEndOffset - startOffset,
+            insertText: newText.slice(startOffset, newEndOffset)
+        };
+        console.log('findTextDiff result:', result);
+        return result;
+    }
+
     private handleInput(peer_id: number, event: InputEvent): void {
         const state = this.peers.get(peer_id) as PeerState;
         const els = this.peer_elements.get(peer_id) as PeerElements;
 
-        // Handle text input (including paste)
-        if (event.inputType === 'insertText' || event.inputType === 'insertFromPaste' || event.inputType === 'insertLineBreak') {
-            const text = event.inputType === 'insertLineBreak' ? '\n' : (event.data || '');
-            const edits: Edit[] = [];
+        // Get the current text content
+        const newText = els.editor.textContent || '';
+        const oldText = treeToString(state.root_id, state.tree_by_id);
+        console.log('handleInput:', {
+            type: event.inputType,
+            data: event.data,
+            oldText,
+            newText
+        });
 
-            // If there's a selection, delete it first
-            const selection = window.getSelection();
-            if (selection && selection.toString()) {
-                const range = selection.getRangeAt(0);
-                const startOffset = range.startOffset + 1;
-                const endOffset = range.endOffset + 1;
+        const diff = this.findTextDiff(oldText, newText);
+        const edits: Edit[] = [];
 
-                const nodes = preorderTree(state.root_id, state.tree_by_id);
-                const visibleNodes = nodes.filter(node => !isNodeTombstone(node, state.tree_by_id));
-                const nodesToDelete = visibleNodes.slice(startOffset, endOffset);
+        // Handle deletions
+        if (diff.deleteCount > 0) {
+            const nodes = preorderTree(state.root_id, state.tree_by_id);
+            const visibleNodes = nodes.filter(node => !isNodeTombstone(node, state.tree_by_id))
+                .slice(1);  // Remove sentinel from visible nodes
+            const nodesToDelete = visibleNodes.slice(diff.startOffset, diff.startOffset + diff.deleteCount);
 
-                // Add deletion edits
-                nodesToDelete.forEach(node => {
-                    const deleteEdit: Edit = {
-                        type: 'Delete' as const,
-                        index: node
-                    };
-                    edits.push(deleteEdit);
+            nodesToDelete.forEach(node => {
+                edits.push({
+                    type: 'Delete' as const,
+                    index: node
                 });
+            });
 
-                // Apply the deletion edits
-                mergeEdits(state, edits);
+            mergeEdits(state, edits);
+        }
 
-                // Update cursor to start of selection for the insertion
-                state.cursor_node = startOffset > 0 ? visibleNodes[startOffset - 1] : state.root_id;
-            }
+        // Handle insertions
+        if (diff.insertText) {
+            const nodes = preorderTree(state.root_id, state.tree_by_id);
+            const visibleNodes = nodes.filter(node => !isNodeTombstone(node, state.tree_by_id))
+                .slice(1);  // Remove sentinel from visible nodes
 
-            // Insert each character sequentially
-            for (const char of text) {
-                const edit: Edit = {
+            // Find parent node for insertion
+            const parent = diff.startOffset === 0 ? state.root_id : visibleNodes[diff.startOffset - 1];
+
+            // Insert each character
+            let lastInsertedId = parent;
+            diff.insertText.split('').forEach(char => {
+                const insertEdit: Edit = {
                     type: 'Insert',
-                    parent: state.cursor_node,
+                    parent: lastInsertedId,
                     new_id: mk_id(state.peer_id, state.next_clock++),
                     value: char
                 };
-                edits.push(edit);
-                mergeEdits(state, [edit]);
-                state.cursor_node = edit.new_id;
-            }
-
-            if (edits.length > 0) {
-                this.broadcastEdits(peer_id, edits);
-                this.updateUI(state, els);
-                this.setCaretPosition(peer_id);
-            }
+                edits.push(insertEdit);
+                mergeEdits(state, [insertEdit]);
+                lastInsertedId = insertEdit.new_id;
+            });
         }
-        // Handle deletion
-        else if (event.inputType.startsWith('delete')) {
-            const nodes = preorderTree(state.root_id, state.tree_by_id);
-            const edits: Edit[] = [];
 
-            // Get visible (non-tombstone) nodes and their indices
-            const visibleNodes = nodes.filter(node => !isNodeTombstone(node, state.tree_by_id));
-            const cursorIndex = visibleNodes.indexOf(state.cursor_node);
-
-            // For deleteContentForward (Delete key), delete the node at cursor
-            // For deleteContentBackward (Backspace), delete the cursor node itself
-            const nodeToDelete = state.cursor_node;
-            if (nodeToDelete !== state.root_id) {
-                const edit: Edit = {
-                    type: 'Delete',
-                    index: nodeToDelete
-                };
-                edits.push(edit);
-                mergeEdits(state, [edit]);
-
-                // Update cursor position
-                const currentIndex = visibleNodes.indexOf(nodeToDelete);
-                if (currentIndex > 0) {
-                    state.cursor_node = visibleNodes[currentIndex - 1];
-                } else {
-                    state.cursor_node = state.root_id;
-                }
-            }
-
-            if (edits.length > 0) {
-                this.broadcastEdits(peer_id, edits);
-                this.updateUI(state, els);
-                this.setCaretPosition(peer_id);
-            }
+        if (edits.length > 0) {
+            this.broadcastEdits(peer_id, edits);
+            this.refreshTree(peer_id);
         }
     }
 
@@ -424,265 +431,95 @@ class CRDTEditor {
         const state = this.peers.get(peer_id) as PeerState;
         const els = this.peer_elements.get(peer_id) as PeerElements;
 
-        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        // Handle special keys
+        if (event.key === 'Tab') {
             event.preventDefault();
-
-            const nodes = preorderTree(state.root_id, state.tree_by_id);
-            const currentIndex = nodes.indexOf(state.cursor_node);
-
-            if (event.key === 'ArrowLeft' && currentIndex > 0) {
-                let prevIndex = currentIndex - 1;
-                while (prevIndex > 0 && isNodeTombstone(nodes[prevIndex], state.tree_by_id)) {
-                    prevIndex--;
-                }
-                state.cursor_node = nodes[prevIndex];
-            } else if (event.key === 'ArrowRight' && currentIndex < nodes.length - 1) {
-                let nextIndex = currentIndex + 1;
-                while (nextIndex < nodes.length && isNodeTombstone(nodes[nextIndex], state.tree_by_id)) {
-                    nextIndex++;
-                }
-                if (nextIndex < nodes.length) {
-                    state.cursor_node = nodes[nextIndex];
-                }
-            }
-
-            this.setCaretPosition(peer_id);
-        }
-        // Handle up/down arrow keys
-        else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
-            event.preventDefault();
-
-            const selection = window.getSelection();
-            if (!selection || !selection.rangeCount) return;
-
-            // Get the current cursor position's coordinates
-            const range = selection.getRangeAt(0);
-            const currentRect = range.getBoundingClientRect();
-            const currentX = currentRect.left;
-
-            // Get all text nodes and their positions
-            const nodes = preorderTree(state.root_id, state.tree_by_id);
-            const visibleNodes = nodes.filter(node => !isNodeTombstone(node, state.tree_by_id));
-
-            // Create temporary ranges to measure positions
-            const positions: { node: string; rect: DOMRect }[] = [];
-            const tempRange = document.createRange();
-
-            visibleNodes.forEach(node_id => {
-                if (node_id === state.root_id) return;  // Skip root node
-
-                const text = treeToString(node_id, state.tree_by_id);
-                if (text === '\n') return;  // Skip newline nodes when measuring
-
-                tempRange.setStart(els.editor.firstChild || els.editor, positions.length);
-                tempRange.setEnd(els.editor.firstChild || els.editor, positions.length + 1);
-                positions.push({ node: node_id, rect: tempRange.getBoundingClientRect() });
-            });
-
-            // Find current node's vertical position
-            const currentNodeIndex = positions.findIndex(pos => pos.node === state.cursor_node);
-            if (currentNodeIndex === -1) return;
-            const currentY = positions[currentNodeIndex].rect.top;
-
-            // Find nodes on the target line
-            const targetY = event.key === 'ArrowUp'
-                ? Math.max(...positions.map(p => p.rect.top).filter(y => y < currentY))
-                : Math.min(...positions.map(p => p.rect.top).filter(y => y > currentY));
-
-            if (targetY === Infinity || targetY === -Infinity) return;  // No line above/below
-
-            // Find the closest node on the target line
-            let closestNode = state.cursor_node;
-            let minDistance = Infinity;
-
-            positions.forEach(pos => {
-                if (Math.abs(pos.rect.top - targetY) < 1) {  // Node is on target line
-                    const distance = Math.abs(pos.rect.left - currentX);
-                    if (distance < minDistance) {
-                        minDistance = distance;
-                        closestNode = pos.node;
-                    }
-                }
-            });
-
-            state.cursor_node = closestNode;
-            this.setCaretPosition(peer_id);
-        }
-        // Handle Enter key for newlines
-        else if (event.key === 'Enter') {
-            // Let the browser handle the visual update, but capture the event
-            const edits: Edit[] = [];
-
-            // Handle selection case first
-            const selection = window.getSelection();
-            if (selection && selection.toString()) {
-                const range = selection.getRangeAt(0);
-                const startOffset = range.startOffset + 1;
-                const endOffset = range.endOffset + 1;
-
-                const nodes = preorderTree(state.root_id, state.tree_by_id);
-                const visibleNodes = nodes.filter(node => !isNodeTombstone(node, state.tree_by_id));
-                const nodesToDelete = visibleNodes.slice(startOffset, endOffset);
-
-                nodesToDelete.forEach(node => {
-                    edits.push({
-                        type: 'Delete' as const,
-                        index: node
-                    });
-                });
-
-                mergeEdits(state, edits);
-                state.cursor_node = startOffset > 0 ? visibleNodes[startOffset - 1] : state.root_id;
-            }
-
-            // Insert the newline
+            // Insert tab character
             const insertEdit: Edit = {
                 type: 'Insert',
-                parent: state.cursor_node,
+                parent: state.root_id,
                 new_id: mk_id(state.peer_id, state.next_clock++),
-                value: '\n'
+                value: '\t'
             };
-            edits.push(insertEdit);
             mergeEdits(state, [insertEdit]);
-            state.cursor_node = insertEdit.new_id;
-
-            // Broadcast the edits but don't update UI since browser will handle that
-            this.broadcastEdits(peer_id, edits);
-        }
-        // Handle typing over selected text
-        else if (event.key.length === 1 && window.getSelection()?.toString()) {
-            event.preventDefault();
-            const selection = window.getSelection();
-            if (!selection || !selection.rangeCount) return;
-
-            const range = selection.getRangeAt(0);
-            const startOffset = range.startOffset + 1;
-            const endOffset = range.endOffset + 1;
-
-            // Get visible nodes
-            const nodes = preorderTree(state.root_id, state.tree_by_id);
-            const visibleNodes = nodes.filter(node => !isNodeTombstone(node, state.tree_by_id));
-
-            // Calculate which nodes to delete based on selection
-            const nodesToDelete = visibleNodes.slice(startOffset, endOffset);
-            if (nodesToDelete.length === 0) return;
-
-            const edits: Edit[] = nodesToDelete.map(node => ({
-                type: 'Delete' as const,
-                index: node
-            }));
-
-            // Update cursor to the start of selection
-            state.cursor_node = startOffset > 0 ? visibleNodes[startOffset - 1] : state.root_id;
-
-            // Apply all deletes
-            mergeEdits(state, edits);
-
-            // Insert the typed character
-            const insertEdit: Edit = {
-                type: 'Insert',
-                parent: state.cursor_node,
-                new_id: mk_id(state.peer_id, state.next_clock++),
-                value: event.key
-            };
-            edits.push(insertEdit);
-            mergeEdits(state, [insertEdit]);
-            state.cursor_node = insertEdit.new_id;
-
-            this.broadcastEdits(peer_id, edits);
-            this.updateUI(state, els);
-            this.setCaretPosition(peer_id);
-        }
-        // Handle range deletion with backspace or delete
-        else if ((event.key === 'Backspace' || event.key === 'Delete') && window.getSelection()?.toString()) {
-            event.preventDefault();
-            const selection = window.getSelection();
-            if (!selection || !selection.rangeCount) return;
-
-            const range = selection.getRangeAt(0);
-            const startOffset = range.startOffset + 1;
-            const endOffset = range.endOffset + 1;
-
-            // Get visible nodes
-            const nodes = preorderTree(state.root_id, state.tree_by_id);
-            const visibleNodes = nodes.filter(node => !isNodeTombstone(node, state.tree_by_id));
-
-            // Calculate which nodes to delete based on selection
-            const nodesToDelete = visibleNodes.slice(startOffset, endOffset);
-            if (nodesToDelete.length === 0) return;
-
-            const edits: Edit[] = nodesToDelete.map(node => ({
-                type: 'Delete' as const,
-                index: node
-            }));
-
-            // Update cursor to the start of selection
-            state.cursor_node = startOffset > 0 ? visibleNodes[startOffset - 1] : state.root_id;
-
-            // Apply all deletes
-            mergeEdits(state, edits);
-            this.broadcastEdits(peer_id, edits);
-            this.updateUI(state, els);
-            this.setCaretPosition(peer_id);
+            this.broadcastEdits(peer_id, [insertEdit]);
+            this.refreshTree(peer_id);
         }
     }
 
-    private updateCursorFromSelection(peer_id: number): void {
-        const state = this.peers.get(peer_id) as PeerState;
-        const els = this.peer_elements.get(peer_id) as PeerElements;
-
+    private saveSelection(editor: HTMLDivElement): { start: number; end: number; text: string } | null {
         const selection = window.getSelection();
-        if (!selection || !selection.rangeCount) return;
+        if (!selection || !selection.rangeCount) return null;
 
         const range = selection.getRangeAt(0);
-        const offset = range.startOffset;
+        if (!editor.contains(range.startContainer) || !editor.contains(range.endContainer)) return null;
 
-        // Find the node at the cursor position
-        const nodes = preorderTree(state.root_id, state.tree_by_id);
-        let charCount = 0;
+        return {
+            start: range.startOffset,
+            end: range.endOffset,
+            text: editor.textContent || ''  // Save text at time of selection
+        };
+    }
 
-        for (const node_id of nodes) {
-            if (!isNodeTombstone(node_id, state.tree_by_id)) {
-                if (charCount === offset) {
-                    state.cursor_node = node_id;
-                    break;
-                }
-                charCount++;
-            }
+    private transformPosition(pos: number, oldText: string, newText: string): number {
+        // If position is at the end, keep it at the end
+        if (pos >= oldText.length) return newText.length;
+
+        // Find common prefix length
+        let prefixLen = 0;
+        while (prefixLen < pos &&
+            prefixLen < oldText.length &&
+            prefixLen < newText.length &&
+            oldText[prefixLen] === newText[prefixLen]) {
+            prefixLen++;
         }
+
+        // If position is in unchanged prefix, keep it the same
+        if (pos <= prefixLen) return pos;
+
+        // If text was deleted before position, adjust backwards
+        if (newText.length < oldText.length) {
+            return Math.min(pos, newText.length);
+        }
+
+        // If text was inserted before position, adjust forwards
+        return Math.min(pos + (newText.length - oldText.length), newText.length);
+    }
+
+    private restoreSelection(editor: HTMLDivElement, savedSelection: { start: number; end: number; text: string } | null): void {
+        if (!savedSelection) return;
+
+        const selection = window.getSelection();
+        if (!selection) return;
+
+        const newText = editor.textContent || '';
+
+        // Transform selection positions based on text changes
+        const newStart = this.transformPosition(savedSelection.start, savedSelection.text, newText);
+        const newEnd = this.transformPosition(savedSelection.end, savedSelection.text, newText);
+
+        const range = document.createRange();
+        range.setStart(editor.firstChild || editor, newStart);
+        range.setEnd(editor.firstChild || editor, newEnd);
+
+        selection.removeAllRanges();
+        selection.addRange(range);
     }
 
     private updateEditorContent(peer_id: number): void {
         const state = this.peers.get(peer_id) as PeerState;
         const els = this.peer_elements.get(peer_id) as PeerElements;
 
-        els.editor.textContent = treeToString(state.root_id, state.tree_by_id).slice(1);
-        els.input.value = els.editor.textContent;  // Keep hidden textarea in sync
-    }
+        // Save current selection
+        const savedSelection = this.saveSelection(els.editor);
 
-    private setCaretPosition(peer_id: number): void {
-        const state = this.peers.get(peer_id) as PeerState;
-        const els = this.peer_elements.get(peer_id) as PeerElements;
+        // Get text from tree, excluding sentinel
+        const text = treeToString(state.root_id, state.tree_by_id);
+        els.editor.textContent = text;
+        els.input.value = text;  // Keep hidden textarea in sync
 
-        const nodes = preorderTree(state.root_id, state.tree_by_id);
-        let offset = 0;
-
-        for (const node_id of nodes) {
-            if (node_id === state.cursor_node) break;
-            if (!isNodeTombstone(node_id, state.tree_by_id)) {
-                offset++;
-            }
-        }
-
-        const range = document.createRange();
-        const sel = window.getSelection();
-
-        range.setStart(els.editor.firstChild || els.editor, offset);
-        range.collapse(true);
-
-        sel?.removeAllRanges();
-        sel?.addRange(range);
-        els.editor.focus();
+        // Restore selection
+        this.restoreSelection(els.editor, savedSelection);
     }
 
     private refreshTree(peer_id: number): void {

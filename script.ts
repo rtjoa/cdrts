@@ -192,6 +192,8 @@ class CRDTEditor {
     private network_settings: NetworkSettings;
     private auto_process_input: HTMLInputElement;
     private delay_input: HTMLInputElement;
+    private treeVisible: boolean = true;  // Shared visibility state
+    private treeToggles: Map<number, HTMLAnchorElement> = new Map();  // Store toggle links
 
     constructor() {
         this.peers = new Map([
@@ -230,6 +232,27 @@ class CRDTEditor {
     }
 
     private initializeUI(): void {
+        // Add tree toggle buttons
+        [1, 2].forEach(peer_id => {
+            const treeEl = document.querySelector(`#tree${peer_id}`);
+            if (!treeEl) return;
+
+            const treeSection = treeEl.previousElementSibling;
+            if (treeSection && treeSection.classList.contains('section-title')) {
+                const toggleLink = document.createElement('a');
+                toggleLink.href = '#';
+                toggleLink.textContent = '(Hide)';
+                toggleLink.style.marginLeft = '0.5rem';
+                toggleLink.style.fontSize = '0.9em';
+                toggleLink.onclick = (e) => {
+                    e.preventDefault();
+                    this.toggleTreeVisibility(!this.treeVisible);
+                };
+                treeSection.appendChild(toggleLink);
+                this.treeToggles.set(peer_id, toggleLink);
+            }
+        });
+
         // Set initial text for Peer 1
         const peer1State = this.peers.get(1) as PeerState;
         const peer1Els = this.peer_elements.get(1) as PeerElements;
@@ -945,6 +968,23 @@ class CRDTEditor {
         // Update button tooltips for better UX
         sendTreeButton.title = this.network_settings.auto_process ? 'Disabled during auto-process' :
             (sendTreeButton.disabled ? 'No tree changes to send' : 'Send tree state');
+    }
+
+    private toggleTreeVisibility(visible: boolean): void {
+        this.treeVisible = visible;
+        [1, 2].forEach(peer_id => {
+            const els = this.peer_elements.get(peer_id) as PeerElements;
+            const toggle = this.treeToggles.get(peer_id);
+            if (toggle) {
+                if (visible) {
+                    els.tree.style.display = '';
+                    toggle.textContent = '(Hide)';
+                } else {
+                    els.tree.style.display = 'none';
+                    toggle.textContent = '(Show)';
+                }
+            }
+        });
     }
 }
 

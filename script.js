@@ -125,6 +125,8 @@ const mergeTree = (state, incoming_tree_by_id) => {
 };
 class CRDTEditor {
     constructor() {
+        this.treeVisible = true; // Shared visibility state
+        this.treeToggles = new Map(); // Store toggle links
         this.peers = new Map([
             [1, init_state(1)],
             [2, init_state(2)]
@@ -154,6 +156,26 @@ class CRDTEditor {
         };
     }
     initializeUI() {
+        // Add tree toggle buttons
+        [1, 2].forEach(peer_id => {
+            const treeEl = document.querySelector(`#tree${peer_id}`);
+            if (!treeEl)
+                return;
+            const treeSection = treeEl.previousElementSibling;
+            if (treeSection && treeSection.classList.contains('section-title')) {
+                const toggleLink = document.createElement('a');
+                toggleLink.href = '#';
+                toggleLink.textContent = '(Hide)';
+                toggleLink.style.marginLeft = '0.5rem';
+                toggleLink.style.fontSize = '0.9em';
+                toggleLink.onclick = (e) => {
+                    e.preventDefault();
+                    this.toggleTreeVisibility(!this.treeVisible);
+                };
+                treeSection.appendChild(toggleLink);
+                this.treeToggles.set(peer_id, toggleLink);
+            }
+        });
         // Set initial text for Peer 1
         const peer1State = this.peers.get(1);
         const peer1Els = this.peer_elements.get(1);
@@ -754,6 +776,23 @@ class CRDTEditor {
         // Update button tooltips for better UX
         sendTreeButton.title = this.network_settings.auto_process ? 'Disabled during auto-process' :
             (sendTreeButton.disabled ? 'No tree changes to send' : 'Send tree state');
+    }
+    toggleTreeVisibility(visible) {
+        this.treeVisible = visible;
+        [1, 2].forEach(peer_id => {
+            const els = this.peer_elements.get(peer_id);
+            const toggle = this.treeToggles.get(peer_id);
+            if (toggle) {
+                if (visible) {
+                    els.tree.style.display = '';
+                    toggle.textContent = '(Hide)';
+                }
+                else {
+                    els.tree.style.display = 'none';
+                    toggle.textContent = '(Show)';
+                }
+            }
+        });
     }
 }
 // Initialize the application when the window loads

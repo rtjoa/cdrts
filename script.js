@@ -229,6 +229,14 @@ class CRDTEditor {
             const newDelay = parseFloat(this.delay_input.value);
             if (!isNaN(newDelay) && newDelay >= 0) {
                 this.network_settings.process_delay = newDelay;
+                document.getElementById('delay-value').textContent = `Delay: ${newDelay.toFixed(1)}s`;
+            }
+        });
+        // Also update on input for smoother feedback
+        this.delay_input.addEventListener('input', () => {
+            const newDelay = parseFloat(this.delay_input.value);
+            if (!isNaN(newDelay) && newDelay >= 0) {
+                document.getElementById('delay-value').textContent = `Delay: ${newDelay.toFixed(1)}s`;
             }
         });
     }

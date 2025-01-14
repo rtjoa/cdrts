@@ -359,6 +359,30 @@
         .source-code svg {
             color: currentColor;
         }
+
+        .delay-label {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex: 1;
+        }
+
+        .delay-label input[type="range"] {
+            width: 200px;
+        }
+
+        .delay-label span {
+            color: #6b7280;
+            font-size: 0.875rem;
+            min-width: 2rem;
+        }
+
+        #delay-value {
+            color: var(--primary-color);
+            font-weight: 500;
+            font-size: 0.875rem;
+            min-width: 5rem;
+        }
     </style>
 </head>
 
@@ -404,9 +428,11 @@
                 </label>
             </div>
             <div class="settings-row">
-                <label>
-                    Delay (seconds):
-                    <input type="number" id="delay" value="2.0" step="0.1" min="0">
+                <label class="delay-label">
+                    <span id="delay-value">Delay: 2.0s</span>
+                    <span>0s</span>
+                    <input type="range" id="delay" value="2.0" step="0.1" min="0" max="10">
+                    <span>10s</span>
                 </label>
             </div>
         </div>

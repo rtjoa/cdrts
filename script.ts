@@ -367,17 +367,57 @@ class CRDTEditor {
         const state = this.peers.get(peer_id) as PeerState;
         const els = this.peer_elements.get(peer_id) as PeerElements;
 
-        // Get the current text content
-        const newText = els.editor.textContent || '';
+        // Handle all input types
+        const newText = els.editor.innerHTML
+            .replace(/<div><br><\/div>/g, '\n')  // <div><br></div> -> single newline
+            .replace(/<div>([^<]*)<\/div>/g, '\n$1')  // <div>text</div> -> \ntext
+            .replace(/<div>/g, '\n')  // Any remaining divs -> newline
+            .replace(/<\/div>/g, '')  // Remove div closings
+            .replace(/<br>/g, '\n')   // <br> -> newline
+            || '';
         const oldText = treeToString(state.root_id, state.tree_by_id);
         console.log('handleInput:', {
             type: event.inputType,
             data: event.data,
-            oldText,
-            newText
+            oldText: JSON.stringify(oldText),
+            newText: JSON.stringify(newText),
+            oldLen: oldText.length,
+            newLen: newText.length,
+            oldTextArray: [...oldText].map(c => c.charCodeAt(0)),
+            newTextArray: [...newText].map(c => c.charCodeAt(0)),
+            innerHTML: els.editor.innerHTML
         });
 
+        // Special case for Enter key (insertParagraph)
+        if (event.inputType === 'insertParagraph') {
+            // Get current text and find insertion point at the end
+            const text = treeToString(state.root_id, state.tree_by_id);
+            const insertPos = text.length;
+
+            // Get visible nodes for parent selection
+            const nodes = preorderTree(state.root_id, state.tree_by_id);
+            const visibleNodes = nodes.filter(node => !isNodeTombstone(node, state.tree_by_id))
+                .slice(1);  // Remove sentinel from visible nodes
+
+            // Find parent node for insertion
+            const parent = insertPos === 0 ? state.root_id : visibleNodes[insertPos - 1];
+
+            // Insert newline
+            const insertEdit: Edit = {
+                type: 'Insert',
+                parent,
+                new_id: mk_id(state.peer_id, state.next_clock++),
+                value: '\n'
+            };
+            mergeEdits(state, [insertEdit]);
+            this.broadcastEdits(peer_id, [insertEdit]);
+            this.refreshTree(peer_id);
+            return;
+        }
+
         const diff = this.findTextDiff(oldText, newText);
+        console.log('diff:', diff);
+
         const edits: Edit[] = [];
 
         // Handle deletions
@@ -444,6 +484,7 @@ class CRDTEditor {
             mergeEdits(state, [insertEdit]);
             this.broadcastEdits(peer_id, [insertEdit]);
             this.refreshTree(peer_id);
+            this.updateEditorContent(peer_id);
         }
     }
 
@@ -515,7 +556,7 @@ class CRDTEditor {
 
         // Get text from tree, excluding sentinel
         const text = treeToString(state.root_id, state.tree_by_id);
-        els.editor.textContent = text;
+        els.editor.innerHTML = text.replace(/\n/g, '<br>');
         els.input.value = text;  // Keep hidden textarea in sync
 
         // Restore selection

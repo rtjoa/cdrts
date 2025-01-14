@@ -346,6 +346,58 @@ class CRDTEditor {
             }
             this.setCaretPosition(peer_id);
         }
+        // Handle up/down arrow keys
+        else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+            event.preventDefault();
+            const selection = window.getSelection();
+            if (!selection || !selection.rangeCount)
+                return;
+            // Get the current cursor position's coordinates
+            const range = selection.getRangeAt(0);
+            const currentRect = range.getBoundingClientRect();
+            const currentX = currentRect.left;
+            // Get all text nodes and their positions
+            const nodes = preorderTree(state.root_id, state.tree_by_id);
+            const visibleNodes = nodes.filter(node => !isNodeTombstone(node, state.tree_by_id));
+            // Create temporary ranges to measure positions
+            const positions = [];
+            const tempRange = document.createRange();
+            visibleNodes.forEach(node_id => {
+                if (node_id === state.root_id)
+                    return; // Skip root node
+                const text = treeToString(node_id, state.tree_by_id);
+                if (text === '\n')
+                    return; // Skip newline nodes when measuring
+                tempRange.setStart(els.editor.firstChild || els.editor, positions.length);
+                tempRange.setEnd(els.editor.firstChild || els.editor, positions.length + 1);
+                positions.push({ node: node_id, rect: tempRange.getBoundingClientRect() });
+            });
+            // Find current node's vertical position
+            const currentNodeIndex = positions.findIndex(pos => pos.node === state.cursor_node);
+            if (currentNodeIndex === -1)
+                return;
+            const currentY = positions[currentNodeIndex].rect.top;
+            // Find nodes on the target line
+            const targetY = event.key === 'ArrowUp'
+                ? Math.max(...positions.map(p => p.rect.top).filter(y => y < currentY))
+                : Math.min(...positions.map(p => p.rect.top).filter(y => y > currentY));
+            if (targetY === Infinity || targetY === -Infinity)
+                return; // No line above/below
+            // Find the closest node on the target line
+            let closestNode = state.cursor_node;
+            let minDistance = Infinity;
+            positions.forEach(pos => {
+                if (Math.abs(pos.rect.top - targetY) < 1) { // Node is on target line
+                    const distance = Math.abs(pos.rect.left - currentX);
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        closestNode = pos.node;
+                    }
+                }
+            });
+            state.cursor_node = closestNode;
+            this.setCaretPosition(peer_id);
+        }
         // Handle Enter key for newlines
         else if (event.key === 'Enter') {
             // Let the browser handle the visual update, but capture the event
